@@ -16,8 +16,8 @@ const TransferForm = () => {
       setResult(null);
 
       const transferData = {
-        sourceAccountId: values.sourceAccountId,
-        targetAccountId: values.targetAccountId,
+        from: values.sourceAccountId,
+        to: values.targetAccountId,
         amount: values.amount,
         description: values.description || 'Transfert via middleware'
       };

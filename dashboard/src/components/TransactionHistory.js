@@ -7,20 +7,29 @@ import moment from 'moment';
 const TransactionHistory = () => {
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(false);
-  const [history, setHistory] = useState(null);
+  const [transactions, setTransactions] = useState(null);
+  const [account, setAccount] = useState(null);
   const [error, setError] = useState(null);
 
   const onFinish = async (values) => {
     try {
       setLoading(true);
       setError(null);
-      setHistory(null);
+      setTransactions(null);
+      setAccount(null);
 
+      // 1. Récupérer l'historique
       const historyData = await cbsAPI.getTransactionHistory(values.accountId);
-      setHistory(historyData);
+      
+      // 2. Récupérer les détails du compte
+      const accountData = await cbsAPI.getAccount(values.accountId);
+
+      setTransactions(historyData);
+      setAccount(accountData);
     } catch (err) {
-      setError(err.response?.data?.error || 'Erreur lors de la consultation de l\'historique');
-      setHistory(null);
+      setError(err.response?.data?.message || err.message || 'Erreur lors de la consultation');
+      setTransactions(null);
+      setAccount(null);
     } finally {
       setLoading(false);
     }
@@ -122,37 +131,37 @@ const TransactionHistory = () => {
         </div>
       )}
 
-      {history && (
+      {transactions && account && (
         <div>
           <Card title="Informations du Compte" style={{ marginBottom: '16px' }}>
             <Descriptions bordered column={3}>
               <Descriptions.Item label="ID du Compte">
-                <Tag color="blue">{history.account.id}</Tag>
+                <Tag color="blue">{account.id}</Tag>
               </Descriptions.Item>
               <Descriptions.Item label="Type">
-                <Tag color="purple">{history.account.type}</Tag>
+                <Tag color="purple">{account.type}</Tag>
               </Descriptions.Item>
               <Descriptions.Item label="Solde Actuel">
                 <span style={{ 
-                  color: history.account.balance >= 0 ? '#52c41a' : '#ff4d4f', 
+                  color: account.balance >= 0 ? '#52c41a' : '#ff4d4f', 
                   fontWeight: 'bold',
                   fontSize: '16px'
                 }}>
-                  {history.account.balance.toFixed(2)} €
+                  {account.balance.toFixed(2)} €
                 </span>
               </Descriptions.Item>
               <Descriptions.Item label="IBAN" span={3}>
-                <code>{history.account.iban}</code>
+                <code>{account.iban}</code>
               </Descriptions.Item>
             </Descriptions>
           </Card>
 
           <Card title={
-            <><BankOutlined /> Historique des Transactions ({history.transactions?.length || 0})</>
+            <><BankOutlined /> Historique des Transactions ({transactions?.length || 0})</>
           }>
-            {history.transactions && history.transactions.length > 0 ? (
+            {transactions && transactions.length > 0 ? (
               <Table
-                dataSource={history.transactions}
+                dataSource={transactions}
                 columns={transactionColumns}
                 rowKey="id"
                 pagination={{

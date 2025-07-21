@@ -204,38 +204,37 @@ const Dashboard = () => {
         <h1 style={{ margin: '24px 0', color: '#1890ff' }}>
           <BankOutlined /> Dashboard de Supervision CBS
         </h1>
-        <Tabs defaultActiveKey="1" type="card">
-          <TabPane
-            tab={<span><AreaChartOutlined />Supervision</span>}
-            key="1"
-          >
-            <SupervisionDashboard />
-          </TabPane>
-          <TabPane
-            tab={<span><ArrowRightOutlined />Transfert</span>}
-            key="2"
-          >
-            <TransferForm />
-          </TabPane>
-          <TabPane
-            tab={<span><SearchOutlined />Consultation Compte</span>}
-            key="3"
-          >
-            <AccountConsultation />
-          </TabPane>
-          <TabPane
-            tab={<span><UserOutlined />Consultation Client</span>}
-            key="4"
-          >
-            <CustomerConsultation />
-          </TabPane>
-          <TabPane
-            tab={<span><HistoryOutlined />Historique</span>}
-            key="5"
-          >
-            <TransactionHistory />
-          </TabPane>
-        </Tabs>
+        <Tabs 
+          defaultActiveKey="1" 
+          type="card"
+          items={[
+            {
+              label: <span><AreaChartOutlined />Supervision</span>,
+              key: '1',
+              children: <SupervisionDashboard />,
+            },
+            {
+              label: <span><ArrowRightOutlined />Transfert</span>,
+              key: '2',
+              children: <TransferForm />,
+            },
+            {
+              label: <span><SearchOutlined />Consultation Compte</span>,
+              key: '3',
+              children: <AccountConsultation />,
+            },
+            {
+              label: <span><UserOutlined />Consultation Client</span>,
+              key: '4',
+              children: <CustomerConsultation />,
+            },
+            {
+              label: <span><HistoryOutlined />Historique</span>,
+              key: '5',
+              children: <TransactionHistory />,
+            },
+          ]}
+        />
       </Content>
     </Layout>
   );

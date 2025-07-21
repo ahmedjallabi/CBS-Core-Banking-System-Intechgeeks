@@ -6,6 +6,7 @@ app.use(express.json());
 
 // --- Mock Data ---
 const now = new Date();
+let transactionCounter = 12; // Pour générer des ID de transaction uniques
 
 const customers = {
   'C001': { 
@@ -142,7 +143,7 @@ app.get('/cbs/account/:id', (req, res) => {
 });
 
 app.post('/cbs/transfer', (req, res) => {
-  const { from, to, amount } = req.body;
+  const { from, to, amount, description } = req.body;
   if (!from || !to || !amount) {
     return res.status(400).send('Missing transfer details');
   }
@@ -161,7 +162,34 @@ app.post('/cbs/transfer', (req, res) => {
   fromAccount.balance -= amount;
   toAccount.balance += amount;
 
-  res.status(200).json({ message: 'Transfer successful', fromAccount, toAccount });
+  const debitTransaction = {
+    id: `TRN${String(transactionCounter++).padStart(3, '0')}`,
+    type: 'DÉBIT',
+    date: new Date().toISOString(),
+    description: description || `Virement à ${to}`,
+    montant: -amount,
+  };
+
+  const creditTransaction = {
+      id: `TRN${String(transactionCounter++).padStart(3, '0')}`,
+      type: 'CRÉDIT',
+      date: new Date().toISOString(),
+      description: description || `Virement de ${from}`,
+      montant: amount,
+  };
+
+  if (!history[from]) history[from] = [];
+  history[from].push(debitTransaction);
+  if (!history[to]) history[to] = [];
+  history[to].push(creditTransaction);
+
+  res.status(200).json({ 
+    message: 'Transfer successful', 
+    sourceAccount: fromAccount, 
+    targetAccount: toAccount,
+    debitTransaction,
+    creditTransaction
+  });
 });
 
 app.get('/cbs/customer/:id', (req, res) => {
@@ -175,6 +203,22 @@ app.get('/cbs/customer/:id', (req, res) => {
     res.json({ ...customer, accounts: customerAccounts });
   } else {
     res.status(404).send('Customer not found');
+  }
+});
+
+app.get('/cbs/account/:id/history', (req, res) => {
+  const accountId = req.params.id;
+  const accountHistory = history[accountId];
+
+  if (accountHistory) {
+    res.json(accountHistory);
+  } else {
+    // Si le compte existe mais n'a pas d'historique, retourner un tableau vide.
+    if (accounts[accountId]) {
+      res.json([]);
+    } else {
+      res.status(404).send('Account not found');
+    }
   }
 });
 
