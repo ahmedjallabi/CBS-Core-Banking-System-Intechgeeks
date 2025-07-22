@@ -40,7 +40,7 @@ The CBS (Core Banking System) Middleware is a comprehensive banking system simul
 ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
 │                 │    │                 │    │                 │
 │   Dashboard     │◄──►│   Middleware    │◄──►│  CBS Simulator  │
-│   (Port 3000)   │    │   (Port 3000)   │    │   (Port 4000)   │
+│   (Port 3001)   │    │   (Port 3000)   │    │   (Port 4000)   │
 │                 │    │                 │    │                 │
 │  React + Antd   │    │  Express.js     │    │   Express.js    │
 │  Recharts       │    │  OpenTelemetry  │    │   Mock Data     │
@@ -136,7 +136,7 @@ CBS-Core-Banking-System-Intechgeeks/
 - IBAN format compliance (Tunisian standard)
 
 ### 3. Dashboard (Frontend)
-**Port**: 3000 (React dev server)  
+**Port**: 3001 (React dev server)  
 **Technology**: React 18 + Ant Design + Recharts
 
 **Features**:
@@ -326,6 +326,8 @@ cd dashboard && npm install && cd ..
 npm start
 ```
 
+**Note**: The dashboard will automatically start on port 3001 to avoid conflicts with the middleware API on port 3000.
+
 **Alternative: Start services individually**:
 ```bash
 # Terminal 1: Start CBS Simulator
@@ -334,15 +336,17 @@ cd cbs-simulator && npm start
 # Terminal 2: Start Middleware  
 cd middleware && npm start
 
-# Terminal 3: Start Dashboard
+# Terminal 3: Start Dashboard (will run on port 3001)
 cd dashboard && npm start
 ```
 
 ### Service URLs
-- **Dashboard**: http://localhost:3000 (React App)
+- **Dashboard**: http://localhost:3001 (React App)
 - **Middleware API**: http://localhost:3000 (API Endpoints)
 - **API Documentation**: http://localhost:3000/api-docs (Swagger UI)
 - **CBS Simulator**: http://localhost:4000 (Backend API)
+
+**Important**: The dashboard runs on port 3001 to avoid conflicts with the middleware API on port 3000. Make sure to access the dashboard at the correct URL.
 
 ## 🧪 Testing Scenarios
 

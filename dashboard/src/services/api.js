@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-const baseURL = 'http://localhost:3000'; // URL du middleware CBS
+const baseURL = process.env.REACT_APP_API_URL || 'http://localhost:3000'; // URL du middleware CBS
 
 const apiClient = axios.create({
   baseURL,
