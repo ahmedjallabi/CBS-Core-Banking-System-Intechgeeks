@@ -30,7 +30,9 @@ cbsClient.interceptors.response.use(response => {
 }, error => {
     if (error.config && error.config.headers['x-request-start-time']) {
         const startTime = error.config.headers['x-request-start-time'];
-        error.response.headers['x-response-time'] = Date.now() - startTime;
+        if (error.response) {
+            error.response.headers['x-response-time'] = Date.now() - startTime;
+        }
     }
     return Promise.reject(error);
 });

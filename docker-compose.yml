@@ -8,7 +8,7 @@ services:
     container_name: cbs-simulator
     restart: unless-stopped
     ports:
-      - "4000:8080" # Host port 4000 is mapped to container port 8080
+      - "4000:4000" 
     networks:
       - cbs-net
 
