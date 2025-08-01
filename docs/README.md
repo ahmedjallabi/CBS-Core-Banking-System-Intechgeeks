@@ -5,6 +5,8 @@
 [![Express.js](https://img.shields.io/badge/Express.js-4.18+-lightgrey.svg)](https://expressjs.com/)
 [![Docker](https://img.shields.io/badge/Docker-Enabled-blue.svg)](https://www.docker.com/)
 [![OpenTelemetry](https://img.shields.io/badge/OpenTelemetry-Integrated-orange.svg)](https://opentelemetry.io/)
+[![Status](https://img.shields.io/badge/Status-Active-brightgreen.svg)]()
+[![Last Updated](https://img.shields.io/badge/Last%20Updated-August%202025-blue.svg)]()
 
 ## 📋 Table of Contents
 
@@ -19,6 +21,8 @@
 - [Monitoring & Observability](#-monitoring--observability)
 - [Docker Deployment](#-docker-deployment)
 - [Development Guidelines](#-development-guidelines)
+- [Troubleshooting](#-troubleshooting)
+- [Changelog](#-changelog)
 
 ## 🎯 Overview
 
@@ -28,11 +32,14 @@ The CBS (Core Banking System) Middleware is a comprehensive banking system simul
 
 - **🏦 Complete Banking Operations**: Account management, customer consultation, money transfers
 - **🔄 Real-time Monitoring**: Live performance metrics and health checks
-- **📊 Interactive Dashboard**: React-based administrative interface
+- **📊 Interactive Dashboard**: React-based administrative interface with modern UI
 - **🔍 Distributed Tracing**: OpenTelemetry integration for request tracking
 - **🛡️ Error Handling**: Comprehensive error management and logging
-- **📱 Responsive UI**: Modern Ant Design components
+- **📱 Responsive UI**: Modern Ant Design components with mobile support
 - **🐳 Containerization**: Docker support for easy deployment
+- **⚡ High Performance**: Optimized for production environments
+- **🔒 Secure**: CORS-enabled with input validation
+- **📈 Scalable**: Microservices architecture for horizontal scaling
 
 ## 🏗️ Architecture
 
@@ -289,11 +296,28 @@ Each account has pre-populated transaction history including:
 
 ## 🚀 Installation & Setup
 
+### 🏃‍♂️ Quick Start
+
+```bash
+# Clone and setup in one command
+git clone https://github.com/ahmedjallabi/CBS-Core-Banking-System-Intechgeeks.git
+cd CBS-Core-Banking-System-Intechgeeks
+npm install && cd middleware && npm install && cd ../cbs-simulator && npm install && cd ../dashboard && npm install && cd ..
+npm start
+```
+
+**Then access**:
+- 🌐 **Dashboard**: http://localhost:3001
+- 📖 **API Docs**: http://localhost:3000/api-docs
+
 ### Prerequisites
-- **Node.js**: Version 18 or higher
+- **Node.js**: Version 18 or higher (LTS recommended)
 - **npm**: Version 8 or higher
-- **Docker**: (Optional) For containerized deployment
+- **Docker**: Version 20+ (Optional) For containerized deployment
 - **Git**: For version control
+- **OS**: Windows 10/11, macOS, or Linux
+- **RAM**: Minimum 4GB (8GB recommended)
+- **Port Requirements**: Ensure ports 3000, 3001, and 4000 are available
 
 ### Local Development Setup
 
@@ -326,6 +350,11 @@ cd dashboard && npm install && cd ..
 npm start
 ```
 
+**✅ Success Indicators**:
+- CBS Simulator: `CBS Simulator listening at http://localhost:4000`
+- Middleware: `Middleware listening at http://localhost:3000`
+- Dashboard: `webpack compiled successfully` + opens browser automatically
+
 **Note**: The dashboard will automatically start on port 3001 to avoid conflicts with the middleware API on port 3000.
 
 **Alternative: Start services individually**:
@@ -347,6 +376,30 @@ cd dashboard && npm start
 - **CBS Simulator**: http://localhost:4000 (Backend API)
 
 **Important**: The dashboard runs on port 3001 to avoid conflicts with the middleware API on port 3000. Make sure to access the dashboard at the correct URL.
+
+### 🔍 Verification Steps
+
+After starting all services, verify everything is working:
+
+1. **Health Check**: Visit http://localhost:3000/health
+2. **API Documentation**: Visit http://localhost:3000/api-docs
+3. **Dashboard**: Visit http://localhost:3001
+4. **Test API Call**:
+   ```bash
+   curl http://localhost:3000/customers/C001
+   ```
+
+### 🛑 Stopping Services
+
+```bash
+# Stop all services
+Ctrl+C (in the terminal running npm start)
+
+# Or stop individual services
+pkill -f "node.*middleware"
+pkill -f "node.*cbs-simulator"
+pkill -f "react-scripts"
+```
 
 ## 🧪 Testing Scenarios
 
@@ -540,7 +593,7 @@ The middleware includes comprehensive tracing capabilities:
 
 **Log Format**:
 ```
-[22/Jul/2025:10:15:30 +0000] GET /customers/C001 200 | trace_id=1234567890abcdef span_id=abcdef1234567890 | CBS Status: 200 | CBS Time: 45ms
+[01/Aug/2025:10:15:30 +0000] GET /customers/C001 200 | trace_id=1234567890abcdef span_id=abcdef1234567890 | CBS Status: 200 | CBS Time: 45ms
 ```
 
 ### Health Checks
@@ -591,6 +644,11 @@ services:
       - "4000:4000"
     networks:
       - cbs-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4000/cbs/account/A001"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
 networks:
   cbs-net:
@@ -619,13 +677,53 @@ docker-compose logs -f cbs-simulator
 docker-compose down
 ```
 
+5. **Complete cleanup**:
+```bash
+docker-compose down -v --rmi all
+```
+
+### Production Docker Setup
+
+For production deployment, create a `docker-compose.prod.yml`:
+
+```yaml
+version: '3.8'
+
+services:
+  cbs-simulator:
+    build:
+      context: ./cbs-simulator
+      dockerfile: Dockerfile
+    container_name: cbs-simulator-prod
+    restart: always
+    ports:
+      - "4000:4000"
+    environment:
+      - NODE_ENV=production
+    networks:
+      - cbs-net
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+
+networks:
+  cbs-net:
+    driver: bridge
+```
+
 ### CBS Simulator Dockerfile Features
 
-- **Base Image**: Node.js 18 slim
+- **Base Image**: Node.js 18 slim (security-focused)
 - **Security**: Non-root user execution
-- **Optimization**: Production-only dependencies
-- **Cache**: Efficient layer caching
-- **Port**: Exposes port 8080 (configurable)
+- **Optimization**: Production-only dependencies with `npm ci`
+- **Cache**: Efficient layer caching for faster builds
+- **Port**: Exposes port 4000 (configurable via environment)
+- **Health Checks**: Built-in container health monitoring
 
 ## 🛠️ Development Guidelines
 
@@ -708,18 +806,87 @@ try {
 ### Future Enhancements
 
 **Recommended Improvements**:
-1. **Authentication & Authorization**: JWT-based API security
+1. **Authentication & Authorization**: JWT-based API security with role-based access
 2. **Database Integration**: Replace mock data with PostgreSQL/MongoDB
-3. **Rate Limiting**: Implement request throttling
+3. **Rate Limiting**: Implement request throttling and API quotas
 4. **Caching**: Redis integration for frequently accessed data
-5. **Message Queue**: Add async transaction processing
-6. **Test Coverage**: Comprehensive unit and integration tests
-7. **CI/CD Pipeline**: Automated deployment and testing
-8. **Load Balancing**: Multiple instance support
-9. **Configuration Management**: Environment-based configs
+5. **Message Queue**: Add async transaction processing with RabbitMQ/Apache Kafka
+6. **Test Coverage**: Comprehensive unit and integration tests (Jest, Cypress)
+7. **CI/CD Pipeline**: Automated deployment and testing with GitHub Actions
+8. **Load Balancing**: Multiple instance support with NGINX
+9. **Configuration Management**: Environment-based configs with Kubernetes
 10. **Advanced Monitoring**: Prometheus/Grafana integration
+11. **API Versioning**: Support for multiple API versions
+12. **WebSocket Support**: Real-time notifications and updates
+13. **Multi-language Support**: Internationalization (i18n)
+14. **Mobile App**: React Native companion app
+15. **Blockchain Integration**: Immutable transaction logging
 
 ---
+
+## 🔧 Troubleshooting
+
+### Common Issues
+
+#### Port Already in Use
+```bash
+# Check which process is using port 3000/3001/4000
+netstat -ano | findstr :3000
+# Kill the process (Windows)
+taskkill /PID <PID> /F
+```
+
+#### Node Modules Issues
+```bash
+# Clear npm cache and reinstall
+npm cache clean --force
+rm -rf node_modules package-lock.json
+npm install
+```
+
+#### CORS Errors
+- Ensure middleware is running on port 3000
+- Check that CORS is enabled in middleware/index.js
+- Verify API URLs in dashboard/src/services/api.js
+
+#### Docker Issues
+```bash
+# Reset Docker environment
+docker-compose down -v
+docker system prune -a
+docker-compose up --build
+```
+
+### Performance Tips
+
+1. **Development Mode**: Use `npm run dev` for hot-reloading
+2. **Production Build**: Run `npm run build` for optimized builds
+3. **Memory Usage**: Monitor with the `/metrics` endpoint
+4. **Network**: Use HTTP/2 for better performance
+
+---
+
+## 📅 Changelog
+
+### Version 1.2.0 (August 2025)
+- ✅ **Port Configuration**: Dashboard moved to port 3001
+- ✅ **Environment Variables**: Added .env support
+- ✅ **Enhanced Documentation**: Updated README with troubleshooting
+- ✅ **Cross-platform Support**: Improved Windows compatibility
+- ✅ **Performance Monitoring**: Enhanced real-time metrics
+
+### Version 1.1.0 (July 2025)
+- ✅ **Initial Release**: Complete CBS middleware system
+- ✅ **OpenTelemetry Integration**: Distributed tracing
+- ✅ **Docker Support**: Containerized deployment
+- ✅ **Swagger Documentation**: Interactive API docs
+- ✅ **React Dashboard**: Modern UI with Ant Design
+
+### Version 1.0.0 (June 2025)
+- ✅ **MVP Release**: Basic banking operations
+- ✅ **Mock Data**: Tunisian banking simulation
+- ✅ **REST API**: Complete CRUD operations
+- ✅ **Error Handling**: Comprehensive error management
 
 ## 📄 License
 
@@ -733,12 +900,8 @@ This project is licensed under the ISC License.
 4. Push to the branch: `git push origin feature-name`
 5. Submit a pull request
 
-## 📞 Support
 
-For questions or issues, please contact:
-- **Email**: ahmed.jallabi@example.com
-- **GitHub Issues**: [Create an issue](https://github.com/ahmedjallabi/CBS-Core-Banking-System-Intechgeeks/issues)
 
----
 
-**Built with ❤️ by the IntechGeeks Team**
+**Last Updated**: August 1, 2025  
+
