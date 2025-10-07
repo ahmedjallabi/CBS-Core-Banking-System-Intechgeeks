@@ -12,9 +12,6 @@ pipeline {
         // OWASP ZAP
         ZAP_HOST = '192.168.90.136'
         ZAP_PORT = '8090'
-
-        // SonarQube URL
-        SONAR_HOST_URL = 'http://localhost:9000'
     }
 
     stages {
@@ -25,20 +22,17 @@ pipeline {
         }
 
         stage('Code Quality Analysis (SonarQube)') {
-            steps {
-                withCredentials([string(credentialsId: 'sonar-token', variable: 'SONAR_TOKEN')]) {
-                    sh '''
-                        docker run --rm \
-                          -e SONAR_HOST_URL="${SONAR_HOST_URL}" \
-                          -e SONAR_LOGIN="${SONAR_TOKEN}" \
-                          -v "$PWD":/usr/src \
-                          sonarsource/sonar-scanner-cli \
-                          -Dsonar.projectKey=CBS-stimul \
-                          -Dsonar.sources=.
-                    '''
-                }
-            }
+    steps {
+        withCredentials([string(credentialsId: 'sonar-token', variable: 'SONAR_TOKEN')]) {
+            sh """
+                sonar-scanner \
+                  -Dsonar.projectKey=CBS-stimul \
+                  -Dsonar.sources=. \
+                  -Dsonar.login=$SONAR_TOKEN
+            """
         }
+    }
+}
 
         stage('Dependency Audit (npm audit)') {
             steps {
@@ -94,14 +88,14 @@ pipeline {
         stage('Dynamic Security Testing (OWASP ZAP)') {
             steps {
                 withCredentials([string(credentialsId: 'owasp-zap-api-key', variable: 'ZAP_API_KEY')]) {
-                    sh '''
+                    sh """
                         sleep 10
                         curl "http://${ZAP_HOST}:${ZAP_PORT}/JSON/spider/action/scan/?apikey=${ZAP_API_KEY}&url=http://192.168.72.128:30001" || true
                         sleep 30
                         curl "http://${ZAP_HOST}:${ZAP_PORT}/JSON/ascan/action/scan/?apikey=${ZAP_API_KEY}&url=http://192.168.72.128:30001" || true
                         sleep 60
                         curl "http://${ZAP_HOST}:${ZAP_PORT}/OTHER/core/other/htmlreport/?apikey=${ZAP_API_KEY}" -o owasp-zap-report.html || true
-                    '''
+                    """
                 }
             }
         }
@@ -110,7 +104,7 @@ pipeline {
     post {
         always {
             echo 'Pipeline finished.'
-            archiveArtifacts artifacts: '*-npm-audit.json, *-trivy-report.txt, owasp-zap-report.html', fingerprint: true
+            archiveArtifacts artifacts: '*-npm-audit.json, *-trivy-report.txt, owasp-zap-report.html, sonarqube-report.txt', fingerprint: true
         }
         failure {
             echo 'Pipeline failed.'
