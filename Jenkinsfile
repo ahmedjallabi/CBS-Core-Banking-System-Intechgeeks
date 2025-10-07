@@ -3,36 +3,36 @@ pipeline {
 
     environment {
         // Docker
-        DOCKER_REGISTRY = 'ammariamine'
+        DOCKER_REGISTRY = 'ahm2022'
 
         // Kubernetes
         K8S_NAMESPACE = 'default'
         KUBECONFIG = '/var/lib/jenkins/.kube/config'
 
         // OWASP ZAP
-        ZAP_HOST = '192.168.72.128'
+        ZAP_HOST = '192.168.90.136'
         ZAP_PORT = '8090'
     }
 
     stages {
         stage('Checkout Code') {
             steps {
-                git branch: 'main', credentialsId: 'jenkins-github', url: 'https://github.com/amineammari/CBS-stimul-.git'
+                git branch: 'main', credentialsId: 'jenkins-github', url: 'https://github.com/ahmedjallabi/CBS-Core-Banking-System-Intechgeeks.git'
             }
         }
 
         stage('Code Quality Analysis (SonarQube)') {
-            steps {
-                withCredentials([string(credentialsId: 'sonar-token', variable: 'SONAR_TOKEN')]) {
-                    sh """
-                        /usr/local/bin/sonar-scanner \
-                          -Dsonar.projectKey=CBS-stimul \
-                          -Dsonar.sources=. \
-                          -Dsonar.login=$SONAR_TOKEN
-                    """
-                }
-            }
+    steps {
+        withCredentials([string(credentialsId: 'sonar-token', variable: 'SONAR_TOKEN')]) {
+            sh """
+                sonar-scanner \
+                  -Dsonar.projectKey=CBS-stimul \
+                  -Dsonar.sources=. \
+                  -Dsonar.login=$SONAR_TOKEN
+            """
         }
+    }
+}
 
         stage('Dependency Audit (npm audit)') {
             steps {
