@@ -78,8 +78,8 @@ pipeline {
                 script {
                     def apps = ['cbs-simulator', 'middleware', 'dashboard']
                     apps.each { app ->
-                        sh "sudo kubectl apply -f kubernetes/${app}-deployment.yaml -n ${K8S_NAMESPACE}"
-                        sh "sudo kubectl rollout status deployment/${app} -n ${K8S_NAMESPACE}"
+                        sh "kubectl apply -f kubernetes/${app}-deployment.yaml -n ${K8S_NAMESPACE}"
+                        sh "kubectl rollout status deployment/${app} -n ${K8S_NAMESPACE}"
                     }
                 }
             }
