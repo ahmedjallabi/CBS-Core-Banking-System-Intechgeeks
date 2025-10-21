@@ -12,7 +12,7 @@ pipeline {
         // OWASP ZAP
         ZAP_HOST = '192.168.90.129'
         ZAP_PORT = '8090'
-        
+
         // Cluster IPs
         MASTER_IP = '192.168.90.129'
         WORKER1_IP = '192.168.90.130'
@@ -24,6 +24,13 @@ pipeline {
         disableConcurrentBuilds()
         timeout(time: 2, unit: 'HOURS')
         timestamps()
+    }
+
+    // Définition de fonctions utiles
+    // Cette fonction encapsule kubectl avec l'option --insecure-skip-tls-verify
+    // Usage: kubectl_safe("get pods -n ${K8S_NAMESPACE}")
+    def kubectl_safe(cmd) {
+        sh "kubectl --insecure-skip-tls-verify ${cmd}"
     }
 
     stages {
@@ -115,63 +122,52 @@ pipeline {
                 script {
                     try {
                         echo "=== Creating/Verifying Namespace ==="
-                        sh "kubectl --insecure-skip-tls-verify create namespace ${K8S_NAMESPACE} --dry-run=client -o yaml | kubectl --insecure-skip-tls-verify apply -f -"
-                        
+                        kubectl_safe("create namespace ${K8S_NAMESPACE} --dry-run=client -o yaml | kubectl apply -f -")
+
                         echo "=== Deleting Existing Deployments ==="
-                        sh "kubectl --insecure-skip-tls-verify delete deployment cbs-simulator middleware dashboard -n ${K8S_NAMESPACE} --ignore-not-found=true"
-                        
+                        kubectl_safe("delete deployment cbs-simulator middleware dashboard -n ${K8S_NAMESPACE} --ignore-not-found=true")
+
                         echo "=== Waiting for Pod Termination ==="
                         sh "sleep 15"
-                        
+
                         echo "=== Applying New Deployments ==="
-                        sh "kubectl --insecure-skip-tls-verify apply -f kubernetes/deploy-all.yaml"
-                        
+                        kubectl_safe("apply -f kubernetes/deploy-all.yaml")
+
                         echo "=== Waiting for Deployments to be Ready ==="
                         def apps = ['cbs-simulator', 'middleware', 'dashboard']
                         apps.each { app ->
                             echo "Checking rollout status for: ${app}"
                             timeout(time: 6, unit: 'MINUTES') {
-                                sh "kubectl --insecure-skip-tls-verify rollout status deployment/${app} -n ${K8S_NAMESPACE} --timeout=300s"
+                                kubectl_safe("rollout status deployment/${app} -n ${K8S_NAMESPACE} --timeout=300s")
                             }
                             echo "✓ ${app} deployment successful"
                         }
-                        
+
                         echo "=== Deployment Summary ==="
                         sh """
                             echo "Services:"
-                            kubectl --insecure-skip-tls-verify get services -n ${K8S_NAMESPACE}
+                            ${kubectl_safe("get services -n ${K8S_NAMESPACE}")}
                             echo ""
                             echo "Pods:"
-                            kubectl --insecure-skip-tls-verify get pods -n ${K8S_NAMESPACE} -o wide
+                            ${kubectl_safe("get pods -n ${K8S_NAMESPACE} -o wide")}
                             echo ""
                             echo "Images in use:"
-                            kubectl --insecure-skip-tls-verify get deployments -n ${K8S_NAMESPACE} -o jsonpath='{range .items[*]}{.metadata.name}{\": \"}{.spec.template.spec.containers[0].image}{\"\\n\"}{end}'
+                            ${kubectl_safe("get deployments -n ${K8S_NAMESPACE} -o jsonpath='{range .items[*]}{.metadata.name}{\": \"}{.spec.template.spec.containers[0].image}{\"\\n\"}{end}'")}
                         """
                     } catch (Exception e) {
                         echo "=== DEPLOYMENT FAILED - Gathering Debug Information ==="
                         sh """
                             echo "=== All Resources in Namespace ==="
-                            kubectl --insecure-skip-tls-verify get all -n ${K8S_NAMESPACE} || true
+                            ${kubectl_safe("get all -n ${K8S_NAMESPACE}")}
                             echo ""
                             echo "=== Deployment Details ==="
-                            kubectl --insecure-skip-tls-verify describe deployments -n ${K8S_NAMESPACE} || true
+                            ${kubectl_safe("describe deployments -n ${K8S_NAMESPACE}")}
                             echo ""
                             echo "=== Pod Details ==="
-                            kubectl --insecure-skip-tls-verify describe pods -n ${K8S_NAMESPACE} || true
+                            ${kubectl_safe("describe pods -n ${K8S_NAMESPACE}")}
                             echo ""
                             echo "=== Recent Events ==="
-                            kubectl --insecure-skip-tls-verify get events -n ${K8S_NAMESPACE} --sort-by='.lastTimestamp' --field-selector type!=Normal || true
-                            echo ""
-                            echo "=== Pod Logs ==="
-                            for pod in \$(kubectl --insecure-skip-tls-verify get pods -n ${K8S_NAMESPACE} -o jsonpath='{.items[*].metadata.name}'); do
-                                echo "--- Logs for \$pod ---"
-                                kubectl --insecure-skip-tls-verify logs \$pod -n ${K8S_NAMESPACE} --tail=100 --all-containers=true || true
-                                echo ""
-                            done
-                            echo ""
-                            echo "=== Node Status ==="
-                            kubectl --insecure-skip-tls-verify top nodes || true
-                            kubectl --insecure-skip-tls-verify describe nodes || true
+                            ${kubectl_safe("get events -n ${K8S_NAMESPACE} --sort-by='.lastTimestamp' --field-selector type!=Normal")}
                         """
                         error("Deployment failed: ${e.message}")
                     }
@@ -233,10 +229,7 @@ pipeline {
             echo '=== Pipeline Execution Complete ==='
             script {
                 archiveArtifacts artifacts: '*-npm-audit.json, *-trivy-report.txt, owasp-zap-report.html', allowEmptyArchive: true, fingerprint: true
-                sh """
-                    echo "Final Deployment Status:"
-                    kubectl --insecure-skip-tls-verify get all -n ${K8S_NAMESPACE} || true
-                """
+                kubectl_safe("get all -n ${K8S_NAMESPACE} || true")
             }
         }
         success {
