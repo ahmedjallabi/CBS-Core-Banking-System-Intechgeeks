@@ -3,20 +3,20 @@ pipeline {
 
     environment {
         // Docker
-        DOCKER_REGISTRY = 'ammariamine'
+        DOCKER_REGISTRY = 'ahm2022'
 
         // Kubernetes
         K8S_NAMESPACE = 'cbs-system'
         KUBECONFIG = '/var/lib/jenkins/.kube/config'
 
         // OWASP ZAP
-        ZAP_HOST = '192.168.72.128'
+        ZAP_HOST = '192.168.90.129'
         ZAP_PORT = '8090'
         
         // Cluster IPs
-        MASTER_IP = '192.168.72.128'
-        WORKER1_IP = '192.168.72.129'
-        WORKER2_IP = '192.168.72.130'
+        MASTER_IP = '192.168.90.129'
+        WORKER1_IP = '192.168.90.130'
+        WORKER2_IP = '192.168.90.131'
     }
 
     options {
@@ -29,7 +29,7 @@ pipeline {
     stages {
         stage('Checkout Code') {
             steps {
-                git branch: 'main', credentialsId: 'jenkins-github', url: 'https://github.com/amineammari/CBS-stimul-.git'
+                git branch: 'main', credentialsId: 'jenkins-github', url: 'https://github.com/ahmedjallabi/CBS-Core-Banking-System-Intechgeeks.git'
             }
         }
 
