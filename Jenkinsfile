@@ -70,7 +70,6 @@ pipeline {
                         apps.each { app ->
                             echo "Building ${app}..."
                             if (app == 'dashboard') {
-                                // Pass REACT_APP_API_URL as build-arg for React (use NodePort for external access)
                                 sh """
                                     docker build --no-cache \
                                         -t ${DOCKER_REGISTRY}/${app}:latest \
@@ -99,7 +98,6 @@ pipeline {
             }
         }
 
-
         stage('Image Security Scan (Trivy)') {
             steps {
                 script {
@@ -117,23 +115,23 @@ pipeline {
                 script {
                     try {
                         echo "=== Creating/Verifying Namespace ==="
-                        sh "kubectl create namespace ${K8S_NAMESPACE} --dry-run=client -o yaml | kubectl apply -f -"
+                        sh "kubectl --insecure-skip-tls-verify create namespace ${K8S_NAMESPACE} --dry-run=client -o yaml | kubectl --insecure-skip-tls-verify apply -f -"
                         
                         echo "=== Deleting Existing Deployments ==="
-                        sh "kubectl delete deployment cbs-simulator middleware dashboard -n ${K8S_NAMESPACE} --ignore-not-found=true"
+                        sh "kubectl --insecure-skip-tls-verify delete deployment cbs-simulator middleware dashboard -n ${K8S_NAMESPACE} --ignore-not-found=true"
                         
                         echo "=== Waiting for Pod Termination ==="
                         sh "sleep 15"
                         
                         echo "=== Applying New Deployments ==="
-                        sh "kubectl apply -f kubernetes/deploy-all.yaml"
+                        sh "kubectl --insecure-skip-tls-verify apply -f kubernetes/deploy-all.yaml"
                         
                         echo "=== Waiting for Deployments to be Ready ==="
                         def apps = ['cbs-simulator', 'middleware', 'dashboard']
                         apps.each { app ->
                             echo "Checking rollout status for: ${app}"
                             timeout(time: 6, unit: 'MINUTES') {
-                                sh "kubectl rollout status deployment/${app} -n ${K8S_NAMESPACE} --timeout=300s"
+                                sh "kubectl --insecure-skip-tls-verify rollout status deployment/${app} -n ${K8S_NAMESPACE} --timeout=300s"
                             }
                             echo "✓ ${app} deployment successful"
                         }
@@ -141,39 +139,39 @@ pipeline {
                         echo "=== Deployment Summary ==="
                         sh """
                             echo "Services:"
-                            kubectl get services -n ${K8S_NAMESPACE}
+                            kubectl --insecure-skip-tls-verify get services -n ${K8S_NAMESPACE}
                             echo ""
                             echo "Pods:"
-                            kubectl get pods -n ${K8S_NAMESPACE} -o wide
+                            kubectl --insecure-skip-tls-verify get pods -n ${K8S_NAMESPACE} -o wide
                             echo ""
                             echo "Images in use:"
-                            kubectl get deployments -n ${K8S_NAMESPACE} -o jsonpath='{range .items[*]}{.metadata.name}{": "}{.spec.template.spec.containers[0].image}{"\\n"}{end}'
+                            kubectl --insecure-skip-tls-verify get deployments -n ${K8S_NAMESPACE} -o jsonpath='{range .items[*]}{.metadata.name}{\": \"}{.spec.template.spec.containers[0].image}{\"\\n\"}{end}'
                         """
                     } catch (Exception e) {
                         echo "=== DEPLOYMENT FAILED - Gathering Debug Information ==="
                         sh """
                             echo "=== All Resources in Namespace ==="
-                            kubectl get all -n ${K8S_NAMESPACE} || true
+                            kubectl --insecure-skip-tls-verify get all -n ${K8S_NAMESPACE} || true
                             echo ""
                             echo "=== Deployment Details ==="
-                            kubectl describe deployments -n ${K8S_NAMESPACE} || true
+                            kubectl --insecure-skip-tls-verify describe deployments -n ${K8S_NAMESPACE} || true
                             echo ""
                             echo "=== Pod Details ==="
-                            kubectl describe pods -n ${K8S_NAMESPACE} || true
+                            kubectl --insecure-skip-tls-verify describe pods -n ${K8S_NAMESPACE} || true
                             echo ""
                             echo "=== Recent Events ==="
-                            kubectl get events -n ${K8S_NAMESPACE} --sort-by='.lastTimestamp' --field-selector type!=Normal || true
+                            kubectl --insecure-skip-tls-verify get events -n ${K8S_NAMESPACE} --sort-by='.lastTimestamp' --field-selector type!=Normal || true
                             echo ""
                             echo "=== Pod Logs ==="
-                            for pod in \$(kubectl get pods -n ${K8S_NAMESPACE} -o jsonpath='{.items[*].metadata.name}'); do
+                            for pod in \$(kubectl --insecure-skip-tls-verify get pods -n ${K8S_NAMESPACE} -o jsonpath='{.items[*].metadata.name}'); do
                                 echo "--- Logs for \$pod ---"
-                                kubectl logs \$pod -n ${K8S_NAMESPACE} --tail=100 --all-containers=true || true
+                                kubectl --insecure-skip-tls-verify logs \$pod -n ${K8S_NAMESPACE} --tail=100 --all-containers=true || true
                                 echo ""
                             done
                             echo ""
                             echo "=== Node Status ==="
-                            kubectl top nodes || true
-                            kubectl describe nodes || true
+                            kubectl --insecure-skip-tls-verify top nodes || true
+                            kubectl --insecure-skip-tls-verify describe nodes || true
                         """
                         error("Deployment failed: ${e.message}")
                     }
@@ -187,8 +185,8 @@ pipeline {
                     echo "=== Verifying Application Health ==="
                     sh """
                         sleep 15
-                        RUNNING_PODS=\$(kubectl get pods -n ${K8S_NAMESPACE} --field-selector=status.phase=Running --no-headers | wc -l)
-                        TOTAL_PODS=\$(kubectl get pods -n ${K8S_NAMESPACE} --no-headers | wc -l)
+                        RUNNING_PODS=\$(kubectl --insecure-skip-tls-verify get pods -n ${K8S_NAMESPACE} --field-selector=status.phase=Running --no-headers | wc -l)
+                        TOTAL_PODS=\$(kubectl --insecure-skip-tls-verify get pods -n ${K8S_NAMESPACE} --no-headers | wc -l)
                         echo "Running Pods: \$RUNNING_PODS / \$TOTAL_PODS"
                         if [ "\$RUNNING_PODS" -eq 0 ]; then
                             echo "ERROR: No pods are running!"
@@ -237,7 +235,7 @@ pipeline {
                 archiveArtifacts artifacts: '*-npm-audit.json, *-trivy-report.txt, owasp-zap-report.html', allowEmptyArchive: true, fingerprint: true
                 sh """
                     echo "Final Deployment Status:"
-                    kubectl get all -n ${K8S_NAMESPACE} || true
+                    kubectl --insecure-skip-tls-verify get all -n ${K8S_NAMESPACE} || true
                 """
             }
         }
@@ -253,8 +251,8 @@ pipeline {
             script {
                 sh """
                     echo "=== Final Debug Information ==="
-                    kubectl get pods -n ${K8S_NAMESPACE} -o wide || true
-                    kubectl get events -n ${K8S_NAMESPACE} --sort-by='.lastTimestamp' | tail -20 || true
+                    kubectl --insecure-skip-tls-verify get pods -n ${K8S_NAMESPACE} -o wide || true
+                    kubectl --insecure-skip-tls-verify get events -n ${K8S_NAMESPACE} --sort-by='.lastTimestamp' | tail -20 || true
                 """
             }
         }
