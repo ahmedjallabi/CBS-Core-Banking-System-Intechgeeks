@@ -1,4 +1,6 @@
+# =========================
 # Build stage
+# =========================
 FROM node:20-alpine AS builder
 
 # Set working directory
@@ -25,7 +27,9 @@ ENV REACT_APP_API_URL=$REACT_APP_API_URL
 # Build React app
 RUN npm run build
 
+# =========================
 # Production stage
+# =========================
 FROM nginx:1.25-alpine
 
 # Copy built files from builder
@@ -34,7 +38,7 @@ COPY --from=builder /app/build /usr/share/nginx/html
 # Set proper ownership
 RUN chown -R nginx:nginx /usr/share/nginx/html
 
-# Expose HTTP port 80
+# Expose port 80
 EXPOSE 80
 
 # Healthcheck
