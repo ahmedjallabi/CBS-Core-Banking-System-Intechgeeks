@@ -65,50 +65,42 @@ pipeline {
             }
         }
 
-        stage('Docker Build & Push') {
-    steps {
-        withDockerRegistry(credentialsId: 'docker-hub-creds', url: 'https://index.docker.io/v1/') {
-            script {
-                // Liste des applications et leur port local pour le test
-                def apps = [
-                    'cbs-simulator': 8081,
-                    'middleware': 8082,
-                    'dashboard': 8083
-                ]
-
-                apps.each { app, port ->
-                    echo "Building ${app}..."
-                    
-                    if (app == 'dashboard') {
-                        sh """
-                            docker build --no-cache \
-                            -t ${DOCKER_REGISTRY}/${app}:latest \
-                            --build-arg REACT_APP_API_URL=http://${MASTER_IP}:30003 \
-                            ./${app}
-                        """
-                    } else {
-                        sh """
-                            docker build --no-cache \
-                            -t ${DOCKER_REGISTRY}/${app}:latest \
-                            ./${app}
-                        """
+       stage('Docker Build & Push') {
+            steps {
+                withDockerRegistry(credentialsId: 'docker-hub-creds', url: 'https://index.docker.io/v1/') {
+                    script {
+                        def apps = ['cbs-simulator', 'middleware', 'dashboard']
+                        apps.each { app ->
+                            echo "Building ${app}..."
+                            if (app == 'dashboard') {
+                                // Pass REACT_APP_API_URL as build-arg for React (use NodePort for external access)
+                                sh """
+                                    docker build --no-cache \
+                                        -t ${DOCKER_REGISTRY}/${app}:latest \
+                                        --build-arg REACT_APP_API_URL=http://${MASTER_IP}:30003 \
+                                        ./${app}
+                                """
+                            } else {
+                                sh """
+                                    docker build --no-cache \
+                                        -t ${DOCKER_REGISTRY}/${app}:latest \
+                                        ./${app}
+                                """
+                            }
+                            echo "Testing ${app} image locally..."
+                            sh "docker run --rm -d --name test-${app} -p 8080:80 ${DOCKER_REGISTRY}/${app}:latest || true"
+                            sh "sleep 5"
+                            sh "curl -f http://localhost:8080 || echo 'Health check failed'"
+                            sh "docker stop test-${app} || true"
+                            sh "docker rm test-${app} || true"
+                            echo "Pushing ${app}..."
+                            sh "docker push ${DOCKER_REGISTRY}/${app}:latest"
+                            echo "✓ ${app} built and pushed successfully"
+                        }
                     }
-
-                    echo "Testing ${app} image locally on port ${port}..."
-                    sh "docker run --rm -d --name test-${app} -p ${port}:80 ${DOCKER_REGISTRY}/${app}:latest || true"
-                    sh "sleep 5"
-                    sh "curl -f http://localhost:${port} || echo 'Health check failed for ${app}'"
-                    sh "docker stop test-${app} || true"
-                    sh "docker rm test-${app} || true"
-
-                    echo "Pushing ${app} to Docker Hub..."
-                    sh "docker push ${DOCKER_REGISTRY}/${app}:latest"
-                    echo "✓ ${app} built, tested, and pushed successfully"
                 }
             }
         }
-    }
-}
 
         stage('Image Security Scan (Trivy)') {
             steps {
@@ -123,27 +115,73 @@ pipeline {
         }
 
         stage('Deployment to Test Env') {
-    steps {
-        script {
-            echo "=== Creating/Verifying Namespace ==="
-            sh '''
-                kubectl create namespace cbs-system --dry-run=client -o yaml | \
-                kubectl apply -f - --insecure-skip-tls-verify
-            '''
-
-            echo "=== Deploying Application ==="
-            sh '''
-                kubectl apply -f kubernetes/ --namespace=cbs-system --insecure-skip-tls-verify
-            '''
-
-            echo "=== Checking Deployment Status ==="
-            sh '''
-                kubectl get all -n cbs-system --insecure-skip-tls-verify
-                kubectl rollout status deployment/cbs-app -n cbs-system --timeout=60s --insecure-skip-tls-verify
-            '''
+            steps {
+                script {
+                    try {
+                        echo "=== Creating/Verifying Namespace ==="
+                        sh "kubectl create namespace ${K8S_NAMESPACE} --dry-run=client -o yaml | kubectl apply -f -"
+                        
+                        echo "=== Deleting Existing Deployments ==="
+                        sh "kubectl delete deployment cbs-simulator middleware dashboard -n ${K8S_NAMESPACE} --ignore-not-found=true"
+                        
+                        echo "=== Waiting for Pod Termination ==="
+                        sh "sleep 15"
+                        
+                        echo "=== Applying New Deployments ==="
+                        sh "kubectl apply -f kubernetes/deploy-all.yaml"
+                        
+                        echo "=== Waiting for Deployments to be Ready ==="
+                        def apps = ['cbs-simulator', 'middleware', 'dashboard']
+                        apps.each { app ->
+                            echo "Checking rollout status for: ${app}"
+                            timeout(time: 6, unit: 'MINUTES') {
+                                sh "kubectl rollout status deployment/${app} -n ${K8S_NAMESPACE} --timeout=300s"
+                            }
+                            echo "✓ ${app} deployment successful"
+                        }
+                        
+                        echo "=== Deployment Summary ==="
+                        sh """
+                            echo "Services:"
+                            kubectl get services -n ${K8S_NAMESPACE}
+                            echo ""
+                            echo "Pods:"
+                            kubectl get pods -n ${K8S_NAMESPACE} -o wide
+                            echo ""
+                            echo "Images in use:"
+                            kubectl get deployments -n ${K8S_NAMESPACE} -o jsonpath='{range .items[*]}{.metadata.name}{": "}{.spec.template.spec.containers[0].image}{"\\n"}{end}'
+                        """
+                    } catch (Exception e) {
+                        echo "=== DEPLOYMENT FAILED - Gathering Debug Information ==="
+                        sh """
+                            echo "=== All Resources in Namespace ==="
+                            kubectl get all -n ${K8S_NAMESPACE} || true
+                            echo ""
+                            echo "=== Deployment Details ==="
+                            kubectl describe deployments -n ${K8S_NAMESPACE} || true
+                            echo ""
+                            echo "=== Pod Details ==="
+                            kubectl describe pods -n ${K8S_NAMESPACE} || true
+                            echo ""
+                            echo "=== Recent Events ==="
+                            kubectl get events -n ${K8S_NAMESPACE} --sort-by='.lastTimestamp' --field-selector type!=Normal || true
+                            echo ""
+                            echo "=== Pod Logs ==="
+                            for pod in \$(kubectl get pods -n ${K8S_NAMESPACE} -o jsonpath='{.items[*].metadata.name}'); do
+                                echo "--- Logs for \$pod ---"
+                                kubectl logs \$pod -n ${K8S_NAMESPACE} --tail=100 --all-containers=true || true
+                                echo ""
+                            done
+                            echo ""
+                            echo "=== Node Status ==="
+                            kubectl top nodes || true
+                            kubectl describe nodes || true
+                        """
+                        error("Deployment failed: ${e.message}")
+                    }
+                }
+            }
         }
-    }
-}
 
 
         stage('Verify Deployment Health') {
