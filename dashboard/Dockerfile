@@ -1,45 +1,46 @@
+# =========================
 # Build stage
+# =========================
 FROM node:20-alpine AS builder
 
-# Set working directory
 WORKDIR /app
 
-# Copy package files
+# Copier uniquement les fichiers de dépendances
 COPY package*.json ./
 
-# Install dependencies with security improvements and network resilience
+# Installer toutes les dépendances (y compris dev)
 RUN npm config set registry https://registry.npmjs.org/ && \
     npm config set fetch-retry-mintimeout 20000 && \
     npm config set fetch-retry-maxtimeout 120000 && \
     npm config set fetch-retries 5 && \
-    npm ci --only=production --ignore-scripts && \
+    npm ci && \
     npm cache clean --force
 
-# Copy all app files
+# Copier le reste du code
 COPY . .
 
-# Build-time argument for API URL
+# Argument pour l’API backend
 ARG REACT_APP_API_URL
 ENV REACT_APP_API_URL=$REACT_APP_API_URL
 
-# Build React app
+# Construire le projet React
 RUN npm run build
 
+# =========================
 # Production stage
+# =========================
 FROM nginx:1.25-alpine
 
-# Copy built files from builder
+# Copier le build dans nginx
 COPY --from=builder /app/build /usr/share/nginx/html
 
-# Set proper ownership
+# Définir le propriétaire des fichiers
 RUN chown -R nginx:nginx /usr/share/nginx/html
 
-# Expose HTTP port 80 (must match containerPort in k8s)
 EXPOSE 80
 
-# Healthcheck using curl (available in nginx:alpine)
+# Healthcheck basique
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
-    CMD curl --fail --silent --show-error http://localhost/ || exit 1
+  CMD wget -q --spider http://localhost/ || exit 1
 
-# Start nginx
 CMD ["nginx", "-g", "daemon off;"]
