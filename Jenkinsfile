@@ -133,7 +133,7 @@ pipeline {
 
             echo "=== Deploying Application ==="
             sh '''
-                kubectl apply -f k8s/ --namespace=cbs-system --insecure-skip-tls-verify
+                kubectl apply -f kubernetes/ --namespace=cbs-system --insecure-skip-tls-verify
             '''
 
             echo "=== Checking Deployment Status ==="
