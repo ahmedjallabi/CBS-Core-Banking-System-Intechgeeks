@@ -68,31 +68,61 @@ pipeline {
                     script {
                         def apps = ['cbs-simulator', 'middleware', 'dashboard']
                         apps.each { app ->
-                            echo "Building ${app}..."
-                            if (app == 'dashboard') {
-                                // Pass REACT_APP_API_URL as build-arg for React (use NodePort for external access)
-                                sh """
-                                    docker build --no-cache \
-                                        -t ${DOCKER_REGISTRY}/${app}:latest \
-                                        --build-arg REACT_APP_API_URL=http://${MASTER_IP}:30003 \
-                                        ./${app}
-                                """
-                            } else {
-                                sh """
-                                    docker build --no-cache \
-                                        -t ${DOCKER_REGISTRY}/${app}:latest \
-                                        ./${app}
-                                """
+                            try {
+                                echo "🔨 Building ${app}..."
+                                
+                                // Build the Docker image
+                                if (app == 'dashboard') {
+                                    // Pass REACT_APP_API_URL as build-arg for React (use NodePort for external access)
+                                    sh """
+                                        docker build --no-cache --pull \
+                                            -t ${DOCKER_REGISTRY}/${app}:latest \
+                                            --build-arg REACT_APP_API_URL=http://${MASTER_IP}:30003 \
+                                            ./${app}
+                                    """
+                                } else {
+                                    sh """
+                                        docker build --no-cache --pull \
+                                            -t ${DOCKER_REGISTRY}/${app}:latest \
+                                            ./${app}
+                                    """
+                                }
+                                
+                                echo "✅ ${app} built successfully"
+                                
+                                // Test the image locally
+                                echo "🧪 Testing ${app} image locally..."
+                                sh "docker run --rm -d --name test-${app} -p 8080:80 ${DOCKER_REGISTRY}/${app}:latest || true"
+                                sh "sleep 10" // Increased sleep time for better reliability
+                                
+                                // Health check with better error handling
+                                def healthCheck = sh(
+                                    script: "curl -f http://localhost:8080",
+                                    returnStatus: true
+                                )
+                                
+                                if (healthCheck != 0) {
+                                    echo "⚠️ Health check failed for ${app}, but continuing..."
+                                } else {
+                                    echo "✅ Health check passed for ${app}"
+                                }
+                                
+                                // Cleanup test container
+                                sh "docker stop test-${app} || true"
+                                sh "docker rm test-${app} || true"
+                                
+                                // Push to registry
+                                echo "📤 Pushing ${app} to registry..."
+                                sh "docker push ${DOCKER_REGISTRY}/${app}:latest"
+                                echo "✅ ${app} built and pushed successfully"
+                                
+                            } catch (Exception e) {
+                                echo "❌ Failed to build/push ${app}: ${e.getMessage()}"
+                                // Cleanup any running test containers
+                                sh "docker stop test-${app} || true"
+                                sh "docker rm test-${app} || true"
+                                throw e
                             }
-                            echo "Testing ${app} image locally..."
-                            sh "docker run --rm -d --name test-${app} -p 8080:80 ${DOCKER_REGISTRY}/${app}:latest || true"
-                            sh "sleep 5"
-                            sh "curl -f http://localhost:8080 || echo 'Health check failed'"
-                            sh "docker stop test-${app} || true"
-                            sh "docker rm test-${app} || true"
-                            echo "Pushing ${app}..."
-                            sh "docker push ${DOCKER_REGISTRY}/${app}:latest"
-                            echo "✓ ${app} built and pushed successfully"
                         }
                     }
                 }
