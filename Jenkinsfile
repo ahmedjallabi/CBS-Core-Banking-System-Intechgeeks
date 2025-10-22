@@ -66,40 +66,49 @@ pipeline {
         }
 
         stage('Docker Build & Push') {
-            steps {
-                withDockerRegistry(credentialsId: 'docker-hub-creds', url: 'https://index.docker.io/v1/') {
-                    script {
-                        def apps = ['cbs-simulator', 'middleware', 'dashboard']
-                        apps.each { app ->
-                            echo "Building ${app}..."
-                            if (app == 'dashboard') {
-                                sh """
-                                    docker build --no-cache \
-                                    -t ${DOCKER_REGISTRY}/${app}:latest \
-                                    --build-arg REACT_APP_API_URL=http://${MASTER_IP}:30003 \
-                                    ./${app}
-                                """
-                            } else {
-                                sh """
-                                    docker build --no-cache \
-                                    -t ${DOCKER_REGISTRY}/${app}:latest \
-                                    ./${app}
-                                """
-                            }
-                            echo "Testing ${app} image locally..."
-                            sh "docker run --rm -d --name test-${app} -p 8080:80 ${DOCKER_REGISTRY}/${app}:latest || true"
-                            sh "sleep 5"
-                            sh "curl -f http://localhost:8080 || echo 'Health check failed'"
-                            sh "docker stop test-${app} || true"
-                            sh "docker rm test-${app} || true"
-                            echo "Pushing ${app}..."
-                            sh "docker push ${DOCKER_REGISTRY}/${app}:latest"
-                            echo "✓ ${app} built and pushed successfully"
-                        }
+    steps {
+        withDockerRegistry(credentialsId: 'docker-hub-creds', url: 'https://index.docker.io/v1/') {
+            script {
+                // Liste des applications et leur port local pour le test
+                def apps = [
+                    'cbs-simulator': 8081,
+                    'middleware': 8082,
+                    'dashboard': 8083
+                ]
+
+                apps.each { app, port ->
+                    echo "Building ${app}..."
+                    
+                    if (app == 'dashboard') {
+                        sh """
+                            docker build --no-cache \
+                            -t ${DOCKER_REGISTRY}/${app}:latest \
+                            --build-arg REACT_APP_API_URL=http://${MASTER_IP}:30003 \
+                            ./${app}
+                        """
+                    } else {
+                        sh """
+                            docker build --no-cache \
+                            -t ${DOCKER_REGISTRY}/${app}:latest \
+                            ./${app}
+                        """
                     }
+
+                    echo "Testing ${app} image locally on port ${port}..."
+                    sh "docker run --rm -d --name test-${app} -p ${port}:80 ${DOCKER_REGISTRY}/${app}:latest || true"
+                    sh "sleep 5"
+                    sh "curl -f http://localhost:${port} || echo 'Health check failed for ${app}'"
+                    sh "docker stop test-${app} || true"
+                    sh "docker rm test-${app} || true"
+
+                    echo "Pushing ${app} to Docker Hub..."
+                    sh "docker push ${DOCKER_REGISTRY}/${app}:latest"
+                    echo "✓ ${app} built, tested, and pushed successfully"
                 }
             }
         }
+    }
+}
 
         stage('Image Security Scan (Trivy)') {
             steps {
