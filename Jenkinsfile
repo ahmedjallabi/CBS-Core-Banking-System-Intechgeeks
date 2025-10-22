@@ -10,7 +10,7 @@ pipeline {
         KUBECONFIG = '/var/lib/jenkins/.kube/config'
 
         // OWASP ZAP
-        ZAP_HOST = '192.168.72.129'
+        ZAP_HOST = '192.168.90.129'
         ZAP_PORT = '8090'
         
         // Cluster IPs
