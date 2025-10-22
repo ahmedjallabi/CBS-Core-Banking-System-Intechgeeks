@@ -12,8 +12,8 @@ pipeline {
         // OWASP ZAP
         ZAP_HOST = '192.168.90.129'
         ZAP_PORT = '8090'
-
-        // Cluster IPs
+        
+       // Cluster IPs
         MASTER_IP = '192.168.90.129'
         WORKER1_IP = '192.168.90.130'
         WORKER2_IP = '192.168.90.131'
@@ -27,12 +27,9 @@ pipeline {
     }
 
     stages {
-
         stage('Checkout Code') {
             steps {
-                git branch: 'main',
-                    credentialsId: 'jenkins-github',
-                    url: 'https://github.com/ahmedjallabi/CBS-Core-Banking-System-Intechgeeks.git'
+                git branch: 'main', credentialsId: 'jenkins-github', url: 'https://github.com/amineammari/CBS-stimul-.git'
             }
         }
 
@@ -41,9 +38,9 @@ pipeline {
                 withCredentials([string(credentialsId: 'sonar-token', variable: 'SONAR_TOKEN')]) {
                     sh """
                         /usr/local/bin/sonar-scanner \
-                        -Dsonar.projectKey=CBS-stimul \
-                        -Dsonar.sources=. \
-                        -Dsonar.login=$SONAR_TOKEN
+                          -Dsonar.projectKey=CBS-stimul \
+                          -Dsonar.sources=. \
+                          -Dsonar.login=$SONAR_TOKEN
                     """
                 }
             }
@@ -65,7 +62,7 @@ pipeline {
             }
         }
 
-       stage('Docker Build & Push') {
+        stage('Docker Build & Push') {
             steps {
                 withDockerRegistry(credentialsId: 'docker-hub-creds', url: 'https://index.docker.io/v1/') {
                     script {
@@ -101,6 +98,7 @@ pipeline {
                 }
             }
         }
+
 
         stage('Image Security Scan (Trivy)') {
             steps {
@@ -183,7 +181,6 @@ pipeline {
             }
         }
 
-
         stage('Verify Deployment Health') {
             steps {
                 script {
@@ -197,7 +194,7 @@ pipeline {
                             echo "ERROR: No pods are running!"
                             exit 1
                         fi
-
+                        echo ""
                         echo "Testing service endpoints..."
                         curl -f -s -o /dev/null -w "Dashboard (port 30004): HTTP %{http_code}\\n" http://${MASTER_IP}:30004 || echo "Dashboard: Not accessible"
                         curl -f -s -o /dev/null -w "Middleware (port 30003): HTTP %{http_code}\\n" http://${MASTER_IP}:30003 || echo "Middleware: Not accessible"
@@ -215,15 +212,12 @@ pipeline {
                         withCredentials([string(credentialsId: 'owasp-zap-api-key', variable: 'ZAP_API_KEY')]) {
                             echo "=== Starting OWASP ZAP Security Scan ==="
                             sh "sleep 10"
-
                             echo "Initiating spider scan..."
                             sh "curl 'http://${ZAP_HOST}:${ZAP_PORT}/JSON/spider/action/scan/?apikey=${ZAP_API_KEY}&url=http://${WORKER1_IP}:30004' || true"
                             sh "sleep 30"
-
                             echo "Initiating active scan..."
                             sh "curl 'http://${ZAP_HOST}:${ZAP_PORT}/JSON/ascan/action/scan/?apikey=${ZAP_API_KEY}&url=http://${WORKER1_IP}:30004' || true"
                             sh "sleep 60"
-
                             echo "Generating report..."
                             sh "curl 'http://${ZAP_HOST}:${ZAP_PORT}/OTHER/core/other/htmlreport/?apikey=${ZAP_API_KEY}' -o owasp-zap-report.html || true"
                         }
@@ -247,7 +241,6 @@ pipeline {
                 """
             }
         }
-
         success {
             echo '✓ Pipeline completed successfully!'
             echo '=== Access URLs ==='
@@ -255,7 +248,6 @@ pipeline {
             echo "Middleware: http://${MASTER_IP}:30003"
             echo "Simulator: http://${MASTER_IP}:30005"
         }
-
         failure {
             echo '✗ Pipeline failed!'
             script {
@@ -266,7 +258,6 @@ pipeline {
                 """
             }
         }
-
         unstable {
             echo '⚠ Pipeline completed with warnings'
         }
