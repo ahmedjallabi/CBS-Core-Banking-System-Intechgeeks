@@ -14,9 +14,9 @@ pipeline {
         ZAP_PORT = '8090'
         
         // Cluster IPs
-        MASTER_IP = '192.168.72.129'
-        WORKER1_IP = '192.168.72.130'
-        WORKER2_IP = '192.168.72.131'
+        MASTER_IP = '192.168.90.129'
+        WORKER1_IP = '192.168.90.130'
+        WORKER2_IP = '192.168.90.131'
     }
 
     options {
