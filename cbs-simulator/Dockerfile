@@ -25,7 +25,7 @@ RUN addgroup --system --gid 1001 nodejs && \
 # Switch to non-root user
 USER nodejs
 
-# Expose the application port (corrected to match code)
+# Expose the application port
 EXPOSE 4000
 
 # Set environment variables
