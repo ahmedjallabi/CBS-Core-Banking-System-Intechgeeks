@@ -12,7 +12,7 @@ pipeline {
         // OWASP ZAP
         ZAP_HOST = '192.168.90.136'
         ZAP_PORT = '8090'
-        
+
         // Cluster IPs
         MASTER_IP = '192.168.90.136'
         WORKER1_IP = '192.168.90.129'
@@ -27,6 +27,7 @@ pipeline {
     }
 
     stages {
+
         stage('Checkout Code') {
             steps {
                 git branch: 'main', credentialsId: 'jenkins-github', url: 'https://github.com/ahmedjallabi/CBS-Core-Banking-System-Intechgeeks.git'
@@ -35,17 +36,20 @@ pipeline {
 
         stage('Code Quality Analysis (SonarQube)') {
             steps {
-                withCredentials([string(credentialsId: 'sonarqube', variable: 'SONAR_TOKEN')]) {
+                withCredentials([string(credentialsId: 'sonarqube', variable: 'SONAR_TOKEN')]) { 
+                    echo "🔗 SonarQube URL: http://192.168.90.136:9000"
                     sh """
-                        /usr/local/bin/sonar-scanner \
-                          -Dsonar.projectKey=CBS-stimul \
-                          -Dsonar.sources=. \
-                          -Dsonar.login=$SONAR_TOKEN
+                        docker run --rm \
+                            -v \$(pwd):/usr/src \
+                            sonarsource/sonar-scanner-cli \
+                            -Dsonar.projectKey=CBS-stimul \
+                            -Dsonar.sources=/usr/src \
+                            -Dsonar.host.url=http://192.168.90.136:9000 \
+                            -Dsonar.login=$SONAR_TOKEN
                     """
                 }
             }
         }
-
 
         stage('Dependency Audit (npm audit)') {
             steps {
@@ -71,7 +75,6 @@ pipeline {
                         apps.each { app ->
                             echo "Building ${app}..."
                             if (app == 'dashboard') {
-                                // Pass REACT_APP_API_URL as build-arg for React (use NodePort for external access)
                                 sh """
                                     docker build --no-cache \
                                         -t ${DOCKER_REGISTRY}/${app}:latest \
@@ -85,19 +88,15 @@ pipeline {
                                         ./${app}
                                 """
                             }
+
                             echo "Testing ${app} image locally..."
-                            if (app == 'dashboard') {
-                                sh "docker run --rm -d --name test-${app} -p 8080:80 ${DOCKER_REGISTRY}/${app}:latest || true"
-                                sh "sleep 5"
-                                sh "curl -f http://localhost:8080 || echo 'Dashboard health check failed'"
-                            } else {
-                                def port = (app == 'middleware') ? '3000' : '4000'
-                                sh "docker run --rm -d --name test-${app} -p 8080:${port} ${DOCKER_REGISTRY}/${app}:latest || true"
-                                sh "sleep 5"
-                                sh "curl -f http://localhost:8080/health || echo '${app} health check failed'"
-                            }
+                            def port = (app == 'dashboard') ? '80' : ((app == 'middleware') ? '3000' : '4000')
+                            sh "docker run --rm -d --name test-${app} -p 8080:${port} ${DOCKER_REGISTRY}/${app}:latest || true"
+                            sh "sleep 5"
+                            sh "curl -f http://localhost:8080 || echo '${app} health check failed'"
                             sh "docker stop test-${app} || true"
                             sh "docker rm test-${app} || true"
+
                             echo "Pushing ${app}..."
                             sh "docker push ${DOCKER_REGISTRY}/${app}:latest"
                             echo "✓ ${app} built and pushed successfully"
@@ -106,7 +105,6 @@ pipeline {
                 }
             }
         }
-
 
         stage('Image Security Scan (Trivy)') {
             steps {
@@ -126,16 +124,16 @@ pipeline {
                     try {
                         echo "=== Creating/Verifying Namespace ==="
                         sh "kubectl create namespace ${K8S_NAMESPACE} --dry-run=client -o yaml | kubectl apply -f -"
-                        
+
                         echo "=== Deleting Existing Deployments ==="
                         sh "kubectl delete deployment cbs-simulator middleware dashboard -n ${K8S_NAMESPACE} --ignore-not-found=true"
-                        
+
                         echo "=== Waiting for Pod Termination ==="
                         sh "sleep 15"
-                        
+
                         echo "=== Applying New Deployments ==="
                         sh "kubectl apply -f kubernetes/cbs-system-complete.yaml"
-                        
+
                         echo "=== Waiting for Deployments to be Ready ==="
                         def apps = ['cbs-simulator', 'middleware', 'dashboard']
                         apps.each { app ->
@@ -145,7 +143,7 @@ pipeline {
                             }
                             echo "✓ ${app} deployment successful"
                         }
-                        
+
                         echo "=== Deployment Summary ==="
                         sh """
                             echo "Services:"
@@ -155,7 +153,7 @@ pipeline {
                             kubectl get pods -n ${K8S_NAMESPACE} -o wide
                             echo ""
                             echo "Images in use:"
-                            kubectl get deployments -n ${K8S_NAMESPACE} -o jsonpath='{range .items[*]}{.metadata.name}{": "}{.spec.template.spec.containers[0].image}{"\\n"}{end}'
+                            kubectl get deployments -n ${K8S_NAMESPACE} -o jsonpath='{range .items[*]}{.metadata.name}{\": \"}{.spec.template.spec.containers[0].image}{\"\\n\"}{end}'
                         """
                     } catch (Exception e) {
                         echo "=== DEPLOYMENT FAILED - Gathering Debug Information ==="
