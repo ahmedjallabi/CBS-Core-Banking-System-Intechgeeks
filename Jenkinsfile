@@ -35,18 +35,30 @@ pipeline {
         }
 
         stage('Code Quality Analysis (SonarQube)') {
-            steps {
-                withSonarQubeEnv('sonarqube') { 
-                    echo "🔗 SonarQube URL: ${env.SONAR_HOST_URL}"
-                    sh """
-                        sonar-scanner \
-                            -Dsonar.projectKey=CBS-stimul \
-                            -Dsonar.sources=. \
-                            -Dsonar.login=${env.SONAR_AUTH_TOKEN}
-                    """
-                }
+    steps {
+        script {
+            // Assurez-vous que le token SonarQube est défini dans Jenkins Credentials avec l'ID 'sonarqube'
+            withCredentials([string(credentialsId: 'sonarqube', variable: 'SONAR_TOKEN')]) {
+                sh """
+                    #!/bin/bash
+                    echo "🔗 SonarQube URL: http://192.168.90.136:9000"
+
+                    # Utiliser le container officiel du scanner
+                    docker run --rm \
+                        -v \$(pwd):/usr/src \
+                        -e SONAR_HOST_URL=http://192.168.90.136:9000 \
+                        -e SONAR_LOGIN=$SONAR_TOKEN \
+                        sonarsource/sonar-scanner-cli \
+                        -Dsonar.projectKey=CBS-stimul \
+                        -Dsonar.sources=/usr/src \
+                        -Dsonar.login=$SONAR_TOKEN \
+                        -Dsonar.host.url=http://192.168.90.136:9000
+                """
             }
         }
+    }
+}
+
 
         stage('Dependency Audit (npm audit)') {
             steps {
