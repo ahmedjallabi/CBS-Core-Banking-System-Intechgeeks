@@ -36,16 +36,13 @@ pipeline {
 
         stage('Code Quality Analysis (SonarQube)') {
             steps {
-                withCredentials([string(credentialsId: 'sonarqube', variable: 'SONAR_TOKEN')]) { 
-                    echo "🔗 SonarQube URL: http://192.168.90.136:9000"
+                withSonarQubeEnv('sonarqube') { 
+                    echo "🔗 SonarQube URL: ${env.SONAR_HOST_URL}"
                     sh """
-                        docker run --rm \
-                            -v \$(pwd):/usr/src \
-                            sonarsource/sonar-scanner-cli \
+                        sonar-scanner \
                             -Dsonar.projectKey=CBS-stimul \
-                            -Dsonar.sources=/usr/src \
-                            -Dsonar.host.url=http://192.168.90.136:9000 \
-                            -Dsonar.login=$SONAR_TOKEN
+                            -Dsonar.sources=. \
+                            -Dsonar.login=${env.SONAR_AUTH_TOKEN}
                     """
                 }
             }
@@ -234,6 +231,7 @@ pipeline {
                 }
             }
         }
+
     }
 
     post {
@@ -241,10 +239,7 @@ pipeline {
             echo '=== Pipeline Execution Complete ==='
             script {
                 archiveArtifacts artifacts: '*-npm-audit.json, *-trivy-report.txt, owasp-zap-report.html', allowEmptyArchive: true, fingerprint: true
-                sh """
-                    echo "Final Deployment Status:"
-                    kubectl get all -n ${K8S_NAMESPACE} || true
-                """
+                sh "kubectl get all -n ${K8S_NAMESPACE} || true"
             }
         }
         success {
@@ -256,13 +251,6 @@ pipeline {
         }
         failure {
             echo '✗ Pipeline failed!'
-            script {
-                sh """
-                    echo "=== Final Debug Information ==="
-                    kubectl get pods -n ${K8S_NAMESPACE} -o wide || true
-                    kubectl get events -n ${K8S_NAMESPACE} --sort-by='.lastTimestamp' | tail -20 || true
-                """
-            }
         }
         unstable {
             echo '⚠ Pipeline completed with warnings'
