@@ -10,8 +10,13 @@ pipeline {
         KUBECONFIG = '/var/lib/jenkins/.kube/config'
 
         // OWASP ZAP
-        ZAP_HOST = '192.168.90.129'
+        ZAP_HOST = '192.168.90.136'
         ZAP_PORT = '8090'
+        
+        // Cluster IPs
+        MASTER_IP = '192.168.90.136'
+        WORKER1_IP = '192.168.90.129'
+        WORKER2_IP = '192.168.90.137'
     }
 
     options {
@@ -65,10 +70,11 @@ pipeline {
                         apps.each { app ->
                             echo "Building ${app}..."
                             if (app == 'dashboard') {
+                                // Pass REACT_APP_API_URL as build-arg for React (use NodePort for external access)
                                 sh """
                                     docker build --no-cache \
                                         -t ${DOCKER_REGISTRY}/${app}:latest \
-                                        --build-arg REACT_APP_API_URL=http://${K8S_NAMESPACE}:30003 \
+                                        --build-arg REACT_APP_API_URL=http://${MASTER_IP}:30003 \
                                         ./${app}
                                 """
                             } else {
@@ -79,9 +85,16 @@ pipeline {
                                 """
                             }
                             echo "Testing ${app} image locally..."
-                            sh "docker run --rm -d --name test-${app} -p 8080:80 ${DOCKER_REGISTRY}/${app}:latest || true"
-                            sh "sleep 5"
-                            sh "curl -f http://localhost:8080 || echo 'Health check failed'"
+                            if (app == 'dashboard') {
+                                sh "docker run --rm -d --name test-${app} -p 8080:80 ${DOCKER_REGISTRY}/${app}:latest || true"
+                                sh "sleep 5"
+                                sh "curl -f http://localhost:8080 || echo 'Dashboard health check failed'"
+                            } else {
+                                def port = (app == 'middleware') ? '3000' : '4000'
+                                sh "docker run --rm -d --name test-${app} -p 8080:${port} ${DOCKER_REGISTRY}/${app}:latest || true"
+                                sh "sleep 5"
+                                sh "curl -f http://localhost:8080/health || echo '${app} health check failed'"
+                            }
                             sh "docker stop test-${app} || true"
                             sh "docker rm test-${app} || true"
                             echo "Pushing ${app}..."
@@ -92,6 +105,7 @@ pipeline {
                 }
             }
         }
+
 
         stage('Image Security Scan (Trivy)') {
             steps {
@@ -119,7 +133,7 @@ pipeline {
                         sh "sleep 15"
                         
                         echo "=== Applying New Deployments ==="
-                        sh "kubectl apply -f kubernetes/deploy-all.yaml"
+                        sh "kubectl apply -f kubernetes/cbs-system-complete.yaml"
                         
                         echo "=== Waiting for Deployments to be Ready ==="
                         def apps = ['cbs-simulator', 'middleware', 'dashboard']
@@ -187,22 +201,12 @@ pipeline {
                             echo "ERROR: No pods are running!"
                             exit 1
                         fi
-                    """
-
-                    // Détection automatique du premier nœud worker Ready
-                    NODE_IP = sh(script: "kubectl get nodes -o wide | grep -m1 ' Ready ' | grep -v control-plane | awk '{print \$6}'", returnStdout: true).trim()
-                    if (NODE_IP == "") {
-                        NODE_IP = sh(script: "kubectl get nodes -o wide | grep -m1 ' Ready ' | awk '{print \$6}'", returnStdout: true).trim()
-                    }
-                    echo "🌐 Using Node IP for endpoint tests: ${NODE_IP}"
-
-                    sh """
                         echo ""
                         echo "Testing service endpoints..."
-                        curl -f -s -o /dev/null -w "Dashboard (port 30004): HTTP %{http_code}\\n" http://${NODE_IP}:30004 || echo "Dashboard: Not accessible"
-                        curl -f -s -o /dev/null -w "Middleware (port 30003): HTTP %{http_code}\\n" http://${NODE_IP}:30003 || echo "Middleware: Not accessible"
-                        curl -f -s -o /dev/null -w "Middleware Health: HTTP %{http_code}\\n" http://${NODE_IP}:30003/health || echo "Middleware /health: Not accessible"
-                        curl -f -s -o /dev/null -w "Simulator (port 30005): HTTP %{http_code}\\n" http://${NODE_IP}:30005 || echo "Simulator: Not accessible"
+                        curl -f -s -o /dev/null -w "Dashboard (port 30004): HTTP %{http_code}\\n" http://${MASTER_IP}:30004 || echo "Dashboard: Not accessible"
+                        curl -f -s -o /dev/null -w "Middleware (port 30003): HTTP %{http_code}\\n" http://${MASTER_IP}:30003 || echo "Middleware: Not accessible"
+                        curl -f -s -o /dev/null -w "Middleware Health: HTTP %{http_code}\\n" http://${MASTER_IP}:30003/health || echo "Middleware /health: Not accessible"
+                        curl -f -s -o /dev/null -w "Simulator (port 30005): HTTP %{http_code}\\n" http://${MASTER_IP}:30005 || echo "Simulator: Not accessible"
                     """
                 }
             }
@@ -216,10 +220,10 @@ pipeline {
                             echo "=== Starting OWASP ZAP Security Scan ==="
                             sh "sleep 10"
                             echo "Initiating spider scan..."
-                            sh "curl 'http://${ZAP_HOST}:${ZAP_PORT}/JSON/spider/action/scan/?apikey=${ZAP_API_KEY}&url=http://${NODE_IP}:30004' || true"
+                            sh "curl 'http://${ZAP_HOST}:${ZAP_PORT}/JSON/spider/action/scan/?apikey=${ZAP_API_KEY}&url=http://${MASTER_IP}:30004' || true"
                             sh "sleep 30"
                             echo "Initiating active scan..."
-                            sh "curl 'http://${ZAP_HOST}:${ZAP_PORT}/JSON/ascan/action/scan/?apikey=${ZAP_API_KEY}&url=http://${NODE_IP}:30004' || true"
+                            sh "curl 'http://${ZAP_HOST}:${ZAP_PORT}/JSON/ascan/action/scan/?apikey=${ZAP_API_KEY}&url=http://${MASTER_IP}:30004' || true"
                             sh "sleep 60"
                             echo "Generating report..."
                             sh "curl 'http://${ZAP_HOST}:${ZAP_PORT}/OTHER/core/other/htmlreport/?apikey=${ZAP_API_KEY}' -o owasp-zap-report.html || true"
@@ -246,6 +250,10 @@ pipeline {
         }
         success {
             echo '✓ Pipeline completed successfully!'
+            echo '=== Access URLs ==='
+            echo "Dashboard: http://${MASTER_IP}:30004"
+            echo "Middleware: http://${MASTER_IP}:30003"
+            echo "Simulator: http://${MASTER_IP}:30005"
         }
         failure {
             echo '✗ Pipeline failed!'
