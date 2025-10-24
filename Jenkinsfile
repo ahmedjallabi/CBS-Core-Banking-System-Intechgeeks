@@ -35,7 +35,7 @@ pipeline {
 
         stage('Code Quality Analysis (SonarQube)') {
             steps {
-                withCredentials([string(credentialsId: 'sonar-token', variable: 'SONAR_TOKEN')]) {
+                    withCredentials([string(credentialsId: 'sonarqube', variable: 'SONAR_TOKEN')]) {
                     sh """
                         /usr/local/bin/sonar-scanner \
                           -Dsonar.projectKey=CBS-stimul \
