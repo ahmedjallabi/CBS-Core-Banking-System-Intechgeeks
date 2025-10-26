@@ -280,11 +280,31 @@ spec:
       restartPolicy: Always
 
 ---
-# Dashboard Service
+# Dashboard ClusterIP Service (for internal pod-to-pod communication)
 apiVersion: v1
 kind: Service
 metadata:
   name: dashboard-service
+  namespace: cbs-system
+  labels:
+    app: dashboard
+spec:
+  type: ClusterIP
+  selector:
+    app: dashboard
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 80
+      name: http
+  sessionAffinity: None
+
+---
+# Dashboard NodePort Service (for external access)
+apiVersion: v1
+kind: Service
+metadata:
+  name: dashboard-nodeport
   namespace: cbs-system
   labels:
     app: dashboard

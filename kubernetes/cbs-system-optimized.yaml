@@ -1,5 +1,5 @@
-# CBS Core Banking System - Complete Deployment Configuration
-# This file ensures proper pod-to-pod communication and NodePort access
+# CBS Core Banking System - Configuration Kubernetes Optimisée
+# Ce fichier assure une communication correcte entre les pods et l'exposition via NodePort
 
 ---
 apiVersion: v1
@@ -72,7 +72,7 @@ spec:
       restartPolicy: Always
 
 ---
-# CBS Simulator ClusterIP Service (for internal pod-to-pod communication)
+# CBS Simulator ClusterIP Service (pour communication interne entre pods)
 apiVersion: v1
 kind: Service
 metadata:
@@ -92,7 +92,7 @@ spec:
   sessionAffinity: None
 
 ---
-# CBS Simulator NodePort Service (for external access)
+# CBS Simulator NodePort Service (pour accès externe)
 apiVersion: v1
 kind: Service
 metadata:
@@ -177,7 +177,7 @@ spec:
       restartPolicy: Always
 
 ---
-# Middleware ClusterIP Service (for internal pod-to-pod communication)
+# Middleware ClusterIP Service (pour communication interne entre pods)
 apiVersion: v1
 kind: Service
 metadata:
@@ -197,7 +197,7 @@ spec:
   sessionAffinity: None
 
 ---
-# Middleware NodePort Service (for external access)
+# Middleware NodePort Service (pour accès externe)
 apiVersion: v1
 kind: Service
 metadata:
@@ -280,11 +280,31 @@ spec:
       restartPolicy: Always
 
 ---
-# Dashboard NodePort Service (for external access)
+# Dashboard ClusterIP Service (pour communication interne entre pods)
 apiVersion: v1
 kind: Service
 metadata:
   name: dashboard-service
+  namespace: cbs-system
+  labels:
+    app: dashboard
+spec:
+  type: ClusterIP
+  selector:
+    app: dashboard
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 80
+      name: http
+  sessionAffinity: None
+
+---
+# Dashboard NodePort Service (pour accès externe)
+apiVersion: v1
+kind: Service
+metadata:
+  name: dashboard-nodeport
   namespace: cbs-system
   labels:
     app: dashboard
@@ -301,7 +321,7 @@ spec:
   sessionAffinity: None
 
 ---
-# Network Policy for pod-to-pod communication
+# Network Policy pour permettre la communication entre pods dans le même namespace
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:

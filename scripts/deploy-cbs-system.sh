@@ -42,8 +42,8 @@ deploy_application() {
     echo "🚀 Deploying CBS Core Banking System..."
     echo "----------------------------------------"
     
-    # Apply the complete configuration
-    if kubectl apply -f kubernetes/cbs-system-complete.yaml; then
+    # Apply the optimized configuration
+    if kubectl apply -f kubernetes/cbs-system-optimized.yaml; then
         echo "✅ Kubernetes manifests applied successfully"
     else
         echo "❌ Failed to apply Kubernetes manifests"

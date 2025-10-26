@@ -87,7 +87,8 @@ pipeline {
                                 sh """
                                     docker build --no-cache \
                                         -t ${DOCKER_REGISTRY}/${app}:latest \
-                                        --build-arg REACT_APP_API_URL=http://${MASTER_IP}:30003 \
+                                        --build-arg REACT_APP_API_URL=http://middleware-service:3000 \
+                                        --build-arg REACT_APP_MIDDLEWARE_URL=http://middleware-service:3000 \
                                         ./${app}
                                 """
                             } else {
@@ -134,14 +135,15 @@ pipeline {
                         echo "=== Creating/Verifying Namespace ==="
                         sh "kubectl create namespace ${K8S_NAMESPACE} --dry-run=client -o yaml | kubectl apply -f -"
 
-                        echo "=== Deleting Existing Deployments ==="
+                        echo "=== Deleting Existing Deployments and Services ==="
                         sh "kubectl delete deployment cbs-simulator middleware dashboard -n ${K8S_NAMESPACE} --ignore-not-found=true"
+                        sh "kubectl delete service cbs-simulator-service cbs-simulator-nodeport middleware-service middleware-nodeport dashboard-service dashboard-nodeport -n ${K8S_NAMESPACE} --ignore-not-found=true"
 
                         echo "=== Waiting for Pod Termination ==="
                         sh "sleep 15"
 
-                        echo "=== Applying New Deployments ==="
-                        sh "kubectl apply -f kubernetes/cbs-system-complete.yaml"
+                        echo "=== Applying New Deployments (Optimized Configuration) ==="
+                        sh "kubectl apply -f kubernetes/cbs-system-optimized.yaml"
 
                         echo "=== Waiting for Deployments to be Ready ==="
                         def apps = ['cbs-simulator', 'middleware', 'dashboard']
@@ -214,7 +216,53 @@ pipeline {
                         curl -f -s -o /dev/null -w "Dashboard (port 30004): HTTP %{http_code}\\n" http://${MASTER_IP}:30004 || echo "Dashboard: Not accessible"
                         curl -f -s -o /dev/null -w "Middleware (port 30003): HTTP %{http_code}\\n" http://${MASTER_IP}:30003 || echo "Middleware: Not accessible"
                         curl -f -s -o /dev/null -w "Middleware Health: HTTP %{http_code}\\n" http://${MASTER_IP}:30003/health || echo "Middleware /health: Not accessible"
-                        curl -f -s -o /dev/null -w "Simulator (port 30005): HTTP %{http_code}\\n" http://${MASTER_IP}:30005 || echo "Simulator: Not accessible"
+                        curl -f -s -o /dev/null -w "CBS Simulator (port 30005): HTTP %{http_code}\\n" http://${MASTER_IP}:30005 || echo "CBS Simulator: Not accessible"
+                        curl -f -s -o /dev/null -w "CBS Simulator Health: HTTP %{http_code}\\n" http://${MASTER_IP}:30005/health || echo "CBS Simulator /health: Not accessible"
+                    """
+                }
+            }
+        }
+
+        stage('Test Pod Communication') {
+            steps {
+                script {
+                    echo "=== Testing Pod-to-Pod Communication ==="
+                    sh """
+                        echo "Creating test pod for communication testing..."
+                        cat <<EOF | kubectl apply -f -
+apiVersion: v1
+kind: Pod
+metadata:
+  name: communication-test-pod
+  namespace: ${K8S_NAMESPACE}
+spec:
+  containers:
+  - name: test-container
+    image: curlimages/curl:latest
+    command: ['sleep', '300']
+  restartPolicy: Never
+EOF
+                        
+                        echo "Waiting for test pod to be ready..."
+                        kubectl wait --for=condition=Ready pod/communication-test-pod -n ${K8S_NAMESPACE} --timeout=60s
+                        
+                        echo "Testing internal communication..."
+                        echo "Testing CBS Simulator service..."
+                        kubectl exec -n ${K8S_NAMESPACE} communication-test-pod -- curl -s -w "CBS Simulator: HTTP %{http_code}\\n" http://cbs-simulator-service:4000/health || echo "CBS Simulator: Communication failed"
+                        
+                        echo "Testing Middleware service..."
+                        kubectl exec -n ${K8S_NAMESPACE} communication-test-pod -- curl -s -w "Middleware: HTTP %{http_code}\\n" http://middleware-service:3000/health || echo "Middleware: Communication failed"
+                        
+                        echo "Testing Dashboard service..."
+                        kubectl exec -n ${K8S_NAMESPACE} communication-test-pod -- curl -s -w "Dashboard: HTTP %{http_code}\\n" http://dashboard-service:80/ || echo "Dashboard: Communication failed"
+                        
+                        echo "Testing Middleware -> CBS Simulator communication..."
+                        kubectl exec -n ${K8S_NAMESPACE} communication-test-pod -- curl -s -w "Middleware->CBS: HTTP %{http_code}\\n" http://middleware-service:3000/customers/C001 || echo "Middleware->CBS: Communication failed"
+                        
+                        echo "Cleaning up test pod..."
+                        kubectl delete pod communication-test-pod -n ${K8S_NAMESPACE} || true
+                        
+                        echo "✓ Pod communication tests completed"
                     """
                 }
             }
@@ -258,8 +306,16 @@ pipeline {
             echo '✓ Pipeline completed successfully!'
             echo '=== Access URLs ==='
             echo "Dashboard: http://${MASTER_IP}:30004"
-            echo "Middleware: http://${MASTER_IP}:30003"
-            echo "Simulator: http://${MASTER_IP}:30005"
+            echo "Middleware API: http://${MASTER_IP}:30003"
+            echo "CBS Simulator: http://${MASTER_IP}:30005"
+            echo ""
+            echo "=== Health Check URLs ==="
+            echo "Dashboard Health: http://${MASTER_IP}:30004/"
+            echo "Middleware Health: http://${MASTER_IP}:30003/health"
+            echo "CBS Simulator Health: http://${MASTER_IP}:30005/health"
+            echo ""
+            echo "=== API Documentation ==="
+            echo "Middleware API Docs: http://${MASTER_IP}:30003/api-docs"
         }
         failure {
             echo '✗ Pipeline failed!'

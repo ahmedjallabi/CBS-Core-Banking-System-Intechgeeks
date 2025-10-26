@@ -42,18 +42,20 @@ if ($LASTEXITCODE -eq 0) {
     exit 1
 }
 
-# Deploy CBS Simulator
-Write-Host "Deploying CBS Simulator..." -ForegroundColor Yellow
-kubectl apply -f kubernetes/cbs-simulator-deployment.yaml
+# Deploy complete CBS system with optimized configuration
+Write-Host "Deploying CBS System (optimized configuration)..." -ForegroundColor Yellow
+kubectl apply -f kubernetes/cbs-system-optimized.yaml
 if ($LASTEXITCODE -eq 0) {
-    Write-Host "✓ CBS Simulator deployed" -ForegroundColor Green
+    Write-Host "✓ CBS System deployed successfully" -ForegroundColor Green
 } else {
-    Write-Error "Failed to deploy CBS Simulator"
+    Write-Error "Failed to deploy CBS System"
     exit 1
 }
 
-# Wait for CBS Simulator to be ready
-Write-Host "Waiting for CBS Simulator to be ready..." -ForegroundColor Yellow
+# Wait for all deployments to be ready
+Write-Host "Waiting for all deployments to be ready..." -ForegroundColor Yellow
+
+Write-Host "Waiting for CBS Simulator..." -ForegroundColor Yellow
 kubectl wait --for=condition=available --timeout=300s deployment/cbs-simulator -n cbs-system
 if ($LASTEXITCODE -eq 0) {
     Write-Host "✓ CBS Simulator is ready" -ForegroundColor Green
@@ -61,18 +63,7 @@ if ($LASTEXITCODE -eq 0) {
     Write-Warning "CBS Simulator may not be fully ready yet"
 }
 
-# Deploy Middleware
-Write-Host "Deploying Middleware..." -ForegroundColor Yellow
-kubectl apply -f kubernetes/middleware-deployment.yaml
-if ($LASTEXITCODE -eq 0) {
-    Write-Host "✓ Middleware deployed" -ForegroundColor Green
-} else {
-    Write-Error "Failed to deploy Middleware"
-    exit 1
-}
-
-# Wait for Middleware to be ready
-Write-Host "Waiting for Middleware to be ready..." -ForegroundColor Yellow
+Write-Host "Waiting for Middleware..." -ForegroundColor Yellow
 kubectl wait --for=condition=available --timeout=300s deployment/middleware -n cbs-system
 if ($LASTEXITCODE -eq 0) {
     Write-Host "✓ Middleware is ready" -ForegroundColor Green
@@ -80,18 +71,7 @@ if ($LASTEXITCODE -eq 0) {
     Write-Warning "Middleware may not be fully ready yet"
 }
 
-# Deploy Dashboard
-Write-Host "Deploying Dashboard..." -ForegroundColor Yellow
-kubectl apply -f kubernetes/dashboard-deployment.yaml
-if ($LASTEXITCODE -eq 0) {
-    Write-Host "✓ Dashboard deployed" -ForegroundColor Green
-} else {
-    Write-Error "Failed to deploy Dashboard"
-    exit 1
-}
-
-# Wait for Dashboard to be ready
-Write-Host "Waiting for Dashboard to be ready..." -ForegroundColor Yellow
+Write-Host "Waiting for Dashboard..." -ForegroundColor Yellow
 kubectl wait --for=condition=available --timeout=300s deployment/dashboard -n cbs-system
 if ($LASTEXITCODE -eq 0) {
     Write-Host "✓ Dashboard is ready" -ForegroundColor Green
@@ -113,12 +93,12 @@ kubectl get pods -n cbs-system
 Write-Host "`nAccess URLs:" -ForegroundColor Yellow
 Write-Host "Dashboard: http://$MasterIP:30004" -ForegroundColor Green
 Write-Host "Middleware API: http://$MasterIP:30003" -ForegroundColor Green
-Write-Host "CBS Simulator: http://$MasterIP:30001" -ForegroundColor Green
+Write-Host "CBS Simulator: http://$MasterIP:30005" -ForegroundColor Green
 
 Write-Host "`nHealth Check URLs:" -ForegroundColor Yellow
 Write-Host "Dashboard Health: http://$MasterIP:30004/" -ForegroundColor Green
 Write-Host "Middleware Health: http://$MasterIP:30003/health" -ForegroundColor Green
-Write-Host "CBS Simulator Health: http://$MasterIP:30001/health" -ForegroundColor Green
+Write-Host "CBS Simulator Health: http://$MasterIP:30005/health" -ForegroundColor Green
 
 Write-Host "`n=========================================" -ForegroundColor Cyan
 Write-Host "Deployment completed successfully!" -ForegroundColor Green
@@ -131,7 +111,7 @@ if ($testDeployment -eq "y" -or $testDeployment -eq "Y") {
     
     # Test CBS Simulator
     try {
-    $cbsResponse = Invoke-RestMethod -Uri "http://$MasterIP:30001/health" -TimeoutSec 10
+        $cbsResponse = Invoke-RestMethod -Uri "http://$MasterIP:30005/health" -TimeoutSec 10
         Write-Host "✓ CBS Simulator is responding" -ForegroundColor Green
     } catch {
         Write-Warning "✗ CBS Simulator health check failed: $_"
