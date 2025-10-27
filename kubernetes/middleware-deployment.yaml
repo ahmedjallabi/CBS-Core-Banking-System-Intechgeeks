@@ -29,7 +29,7 @@ spec:
     spec:
       containers:
       - name: cbs-simulator
-        image: ammariamine/cbs-simulator:latest
+        image: ahm2022/cbs-simulator:latest
         imagePullPolicy: Always
         ports:
         - containerPort: 4000
@@ -123,7 +123,7 @@ spec:
     spec:
       containers:
       - name: middleware
-        image: ammariamine/middleware:latest
+        image: ahm2022/middleware:latest
         imagePullPolicy: Always
         ports:
         - containerPort: 3000
@@ -219,7 +219,7 @@ spec:
     spec:
       containers:
       - name: dashboard
-        image: ammariamine/dashboard:latest
+        image: ahm2022/dashboard:latest
         imagePullPolicy: Always
         ports:
         - containerPort: 80
@@ -227,7 +227,7 @@ spec:
           protocol: TCP
         env:
         - name: REACT_APP_API_URL
-          value: "http://192.169.90.130:3000"
+          value: "http://middleware-service:3000"
         resources:
           requests:
             memory: "128Mi"

@@ -18,7 +18,7 @@ spec:
     spec:
       containers:
       - name: cbs-simulator
-        image: ammariamine/cbs-simulator:latest
+        image: ahm2022/cbs-simulator:latest
         imagePullPolicy: Always
         ports:
         - containerPort: 30001

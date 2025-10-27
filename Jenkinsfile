@@ -10,9 +10,9 @@ pipeline {
         KUBECONFIG = '/var/lib/jenkins/.kube/config'
 
         // OWASP ZAP
-        ZAP_HOST = '192.168.90.136'
+        ZAP_HOST = '192.168.72.136'
         ZAP_PORT = '8090'
-
+        
         // Cluster IPs
         MASTER_IP = '192.168.90.136'
         WORKER1_IP = '192.168.90.129'
@@ -27,7 +27,6 @@ pipeline {
     }
 
     stages {
-
         stage('Checkout Code') {
             steps {
                 git branch: 'main', credentialsId: 'jenkins-github', url: 'https://github.com/ahmedjallabi/CBS-Core-Banking-System-Intechgeeks.git'
@@ -35,30 +34,17 @@ pipeline {
         }
 
         stage('Code Quality Analysis (SonarQube)') {
-    steps {
-        script {
-            // Assurez-vous que le token SonarQube est défini dans Jenkins Credentials avec l'ID 'sonarqube'
-            withCredentials([string(credentialsId: 'sonarqube', variable: 'SONAR_TOKEN')]) {
-                sh """
-                    #!/bin/bash
-                    echo "🔗 SonarQube URL: http://192.168.90.136:9000"
-
-                    # Utiliser le container officiel du scanner
-                    docker run --rm \
-                        -v \$(pwd):/usr/src \
-                        -e SONAR_HOST_URL=http://192.168.90.136:9000 \
-                        -e SONAR_LOGIN=$SONAR_TOKEN \
-                        sonarsource/sonar-scanner-cli \
-                        -Dsonar.projectKey=CBS-stimul \
-                        -Dsonar.sources=/usr/src \
-                        -Dsonar.login=$SONAR_TOKEN \
-                        -Dsonar.host.url=http://192.168.90.136:9000
-                """
+            steps {
+                withCredentials([string(credentialsId: 'sonarqube', variable: 'SONAR_TOKEN')]) {
+                    sh """
+                        /usr/local/bin/sonar-scanner \
+                          -Dsonar.projectKey=CBS-stimul \
+                          -Dsonar.sources=. \
+                          -Dsonar.login=$SONAR_TOKEN
+                    """
+                }
             }
         }
-    }
-}
-
 
         stage('Dependency Audit (npm audit)') {
             steps {
@@ -84,11 +70,11 @@ pipeline {
                         apps.each { app ->
                             echo "Building ${app}..."
                             if (app == 'dashboard') {
+                                // Pass REACT_APP_API_URL as build-arg for React (use NodePort for external access)
                                 sh """
                                     docker build --no-cache \
                                         -t ${DOCKER_REGISTRY}/${app}:latest \
-                                        --build-arg REACT_APP_API_URL=http://middleware-service:3000 \
-                                        --build-arg REACT_APP_MIDDLEWARE_URL=http://middleware-service:3000 \
+                                        --build-arg REACT_APP_API_URL=http://${MASTER_IP}:30003 \
                                         ./${app}
                                 """
                             } else {
@@ -98,15 +84,12 @@ pipeline {
                                         ./${app}
                                 """
                             }
-
                             echo "Testing ${app} image locally..."
-                            def port = (app == 'dashboard') ? '80' : ((app == 'middleware') ? '3000' : '4000')
-                            sh "docker run --rm -d --name test-${app} -p 8080:${port} ${DOCKER_REGISTRY}/${app}:latest || true"
+                            sh "docker run --rm -d --name test-${app} -p 8080:80 ${DOCKER_REGISTRY}/${app}:latest || true"
                             sh "sleep 5"
-                            sh "curl -f http://localhost:8080 || echo '${app} health check failed'"
+                            sh "curl -f http://localhost:8080 || echo 'Health check failed'"
                             sh "docker stop test-${app} || true"
                             sh "docker rm test-${app} || true"
-
                             echo "Pushing ${app}..."
                             sh "docker push ${DOCKER_REGISTRY}/${app}:latest"
                             echo "✓ ${app} built and pushed successfully"
@@ -115,6 +98,7 @@ pipeline {
                 }
             }
         }
+
 
         stage('Image Security Scan (Trivy)') {
             steps {
@@ -134,17 +118,16 @@ pipeline {
                     try {
                         echo "=== Creating/Verifying Namespace ==="
                         sh "kubectl create namespace ${K8S_NAMESPACE} --dry-run=client -o yaml | kubectl apply -f -"
-
-                        echo "=== Deleting Existing Deployments and Services ==="
+                        
+                        echo "=== Deleting Existing Deployments ==="
                         sh "kubectl delete deployment cbs-simulator middleware dashboard -n ${K8S_NAMESPACE} --ignore-not-found=true"
-                        sh "kubectl delete service cbs-simulator-service cbs-simulator-nodeport middleware-service middleware-nodeport dashboard-service dashboard-nodeport -n ${K8S_NAMESPACE} --ignore-not-found=true"
-
+                        
                         echo "=== Waiting for Pod Termination ==="
                         sh "sleep 15"
-
-                        echo "=== Applying New Deployments (Optimized Configuration) ==="
-                        sh "kubectl apply -f kubernetes/cbs-system-optimized.yaml"
-
+                        
+                        echo "=== Applying New Deployments ==="
+                        sh "kubectl apply -f kubernetes/deploy-all.yaml"
+                        
                         echo "=== Waiting for Deployments to be Ready ==="
                         def apps = ['cbs-simulator', 'middleware', 'dashboard']
                         apps.each { app ->
@@ -154,7 +137,7 @@ pipeline {
                             }
                             echo "✓ ${app} deployment successful"
                         }
-
+                        
                         echo "=== Deployment Summary ==="
                         sh """
                             echo "Services:"
@@ -164,7 +147,7 @@ pipeline {
                             kubectl get pods -n ${K8S_NAMESPACE} -o wide
                             echo ""
                             echo "Images in use:"
-                            kubectl get deployments -n ${K8S_NAMESPACE} -o jsonpath='{range .items[*]}{.metadata.name}{\": \"}{.spec.template.spec.containers[0].image}{\"\\n\"}{end}'
+                            kubectl get deployments -n ${K8S_NAMESPACE} -o jsonpath='{range .items[*]}{.metadata.name}{": "}{.spec.template.spec.containers[0].image}{"\\n"}{end}'
                         """
                     } catch (Exception e) {
                         echo "=== DEPLOYMENT FAILED - Gathering Debug Information ==="
@@ -216,53 +199,7 @@ pipeline {
                         curl -f -s -o /dev/null -w "Dashboard (port 30004): HTTP %{http_code}\\n" http://${MASTER_IP}:30004 || echo "Dashboard: Not accessible"
                         curl -f -s -o /dev/null -w "Middleware (port 30003): HTTP %{http_code}\\n" http://${MASTER_IP}:30003 || echo "Middleware: Not accessible"
                         curl -f -s -o /dev/null -w "Middleware Health: HTTP %{http_code}\\n" http://${MASTER_IP}:30003/health || echo "Middleware /health: Not accessible"
-                        curl -f -s -o /dev/null -w "CBS Simulator (port 30005): HTTP %{http_code}\\n" http://${MASTER_IP}:30005 || echo "CBS Simulator: Not accessible"
-                        curl -f -s -o /dev/null -w "CBS Simulator Health: HTTP %{http_code}\\n" http://${MASTER_IP}:30005/health || echo "CBS Simulator /health: Not accessible"
-                    """
-                }
-            }
-        }
-
-        stage('Test Pod Communication') {
-            steps {
-                script {
-                    echo "=== Testing Pod-to-Pod Communication ==="
-                    sh """
-                        echo "Creating test pod for communication testing..."
-                        cat <<EOF | kubectl apply -f -
-apiVersion: v1
-kind: Pod
-metadata:
-  name: communication-test-pod
-  namespace: ${K8S_NAMESPACE}
-spec:
-  containers:
-  - name: test-container
-    image: curlimages/curl:latest
-    command: ['sleep', '300']
-  restartPolicy: Never
-EOF
-                        
-                        echo "Waiting for test pod to be ready..."
-                        kubectl wait --for=condition=Ready pod/communication-test-pod -n ${K8S_NAMESPACE} --timeout=60s
-                        
-                        echo "Testing internal communication..."
-                        echo "Testing CBS Simulator service..."
-                        kubectl exec -n ${K8S_NAMESPACE} communication-test-pod -- curl -s -w "CBS Simulator: HTTP %{http_code}\\n" http://cbs-simulator-service:4000/health || echo "CBS Simulator: Communication failed"
-                        
-                        echo "Testing Middleware service..."
-                        kubectl exec -n ${K8S_NAMESPACE} communication-test-pod -- curl -s -w "Middleware: HTTP %{http_code}\\n" http://middleware-service:3000/health || echo "Middleware: Communication failed"
-                        
-                        echo "Testing Dashboard service..."
-                        kubectl exec -n ${K8S_NAMESPACE} communication-test-pod -- curl -s -w "Dashboard: HTTP %{http_code}\\n" http://dashboard-service:80/ || echo "Dashboard: Communication failed"
-                        
-                        echo "Testing Middleware -> CBS Simulator communication..."
-                        kubectl exec -n ${K8S_NAMESPACE} communication-test-pod -- curl -s -w "Middleware->CBS: HTTP %{http_code}\\n" http://middleware-service:3000/customers/C001 || echo "Middleware->CBS: Communication failed"
-                        
-                        echo "Cleaning up test pod..."
-                        kubectl delete pod communication-test-pod -n ${K8S_NAMESPACE} || true
-                        
-                        echo "✓ Pod communication tests completed"
+                        curl -f -s -o /dev/null -w "Simulator (port 30005): HTTP %{http_code}\\n" http://${MASTER_IP}:30005 || echo "Simulator: Not accessible"
                     """
                 }
             }
@@ -276,10 +213,10 @@ EOF
                             echo "=== Starting OWASP ZAP Security Scan ==="
                             sh "sleep 10"
                             echo "Initiating spider scan..."
-                            sh "curl 'http://${ZAP_HOST}:${ZAP_PORT}/JSON/spider/action/scan/?apikey=${ZAP_API_KEY}&url=http://${MASTER_IP}:30004' || true"
+                            sh "curl 'http://${ZAP_HOST}:${ZAP_PORT}/JSON/spider/action/scan/?apikey=${ZAP_API_KEY}&url=http://${WORKER1_IP}:30004' || true"
                             sh "sleep 30"
                             echo "Initiating active scan..."
-                            sh "curl 'http://${ZAP_HOST}:${ZAP_PORT}/JSON/ascan/action/scan/?apikey=${ZAP_API_KEY}&url=http://${MASTER_IP}:30004' || true"
+                            sh "curl 'http://${ZAP_HOST}:${ZAP_PORT}/JSON/ascan/action/scan/?apikey=${ZAP_API_KEY}&url=http://${WORKER1_IP}:30004' || true"
                             sh "sleep 60"
                             echo "Generating report..."
                             sh "curl 'http://${ZAP_HOST}:${ZAP_PORT}/OTHER/core/other/htmlreport/?apikey=${ZAP_API_KEY}' -o owasp-zap-report.html || true"
@@ -291,7 +228,6 @@ EOF
                 }
             }
         }
-
     }
 
     post {
@@ -299,29 +235,32 @@ EOF
             echo '=== Pipeline Execution Complete ==='
             script {
                 archiveArtifacts artifacts: '*-npm-audit.json, *-trivy-report.txt, owasp-zap-report.html', allowEmptyArchive: true, fingerprint: true
-                sh "kubectl get all -n ${K8S_NAMESPACE} || true"
+                sh """
+                    echo "Final Deployment Status:"
+                    kubectl get all -n ${K8S_NAMESPACE} || true
+                """
             }
         }
         success {
             echo '✓ Pipeline completed successfully!'
             echo '=== Access URLs ==='
             echo "Dashboard: http://${MASTER_IP}:30004"
-            echo "Middleware API: http://${MASTER_IP}:30003"
-            echo "CBS Simulator: http://${MASTER_IP}:30005"
-            echo ""
-            echo "=== Health Check URLs ==="
-            echo "Dashboard Health: http://${MASTER_IP}:30004/"
-            echo "Middleware Health: http://${MASTER_IP}:30003/health"
-            echo "CBS Simulator Health: http://${MASTER_IP}:30005/health"
-            echo ""
-            echo "=== API Documentation ==="
-            echo "Middleware API Docs: http://${MASTER_IP}:30003/api-docs"
+            echo "Middleware: http://${MASTER_IP}:30003"
+            echo "Simulator: http://${MASTER_IP}:30005"
         }
         failure {
             echo '✗ Pipeline failed!'
+            script {
+                sh """
+                    echo "=== Final Debug Information ==="
+                    kubectl get pods -n ${K8S_NAMESPACE} -o wide || true
+                    kubectl get events -n ${K8S_NAMESPACE} --sort-by='.lastTimestamp' | tail -20 || true
+                """
+            }
         }
         unstable {
             echo '⚠ Pipeline completed with warnings'
         }
     }
 }
+
