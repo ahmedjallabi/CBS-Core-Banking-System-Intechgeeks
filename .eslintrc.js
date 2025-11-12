@@ -17,11 +17,9 @@ module.exports = {
   },
   ignorePatterns: [
     'node_modules/',
-    'middleware/',
-    'cbs-simulator/',
-    'dashboard/',
     'dist/',
-    'build/'
+    'build/',
+    '*.min.js'
   ]
 };
 
