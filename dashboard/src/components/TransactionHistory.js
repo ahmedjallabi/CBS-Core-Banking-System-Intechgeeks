@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { Card, Form, Input, Button, Alert, Spin, Descriptions, Tag, Table } from 'antd';
 import { SearchOutlined, HistoryOutlined, BankOutlined } from '@ant-design/icons';
 import { cbsAPI } from '../services/api';

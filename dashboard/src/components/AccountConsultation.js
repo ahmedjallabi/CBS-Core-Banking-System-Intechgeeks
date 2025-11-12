@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Card, Form, Input, Button, Table, Alert, Spin, Descriptions, Tag } from 'antd';
+import { useState } from 'react';
+import { Card, Form, Input, Button, Alert, Spin, Descriptions, Tag } from 'antd';
 import { SearchOutlined, BankOutlined, UserOutlined } from '@ant-design/icons';
 import { cbsAPI } from '../services/api';
 

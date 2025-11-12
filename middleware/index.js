@@ -5,17 +5,67 @@ const swaggerUi = require('swagger-ui-express');
 const swaggerJsDoc = require('swagger-jsdoc');
 const api = require('@opentelemetry/api');
 const cors = require('cors'); // Importer cors
+const { 
+    validateTransfer, 
+    validateAccountId, 
+    validateCustomerId,
+    validateTransaction,
+    validateAccountNumber,
+    validateTransactionValidation
+} = require('./validators');
 
 const app = express();
 const port = 3000;
 
 app.use(express.json());
-// Allow dashboard service and NodePort origins for CORS
-app.use(cors({
-    // Reflect the request origin. This works with credentials and NodePort access.
-    origin: true,
-    credentials: true
-}));
+
+// --- CORS Configuration (Sécurisé) ---
+// Configuration CORS sécurisée basée sur l'environnement
+const allowedOrigins = process.env.CORS_ALLOWED_ORIGINS 
+    ? process.env.CORS_ALLOWED_ORIGINS.split(',')
+    : process.env.NODE_ENV === 'production'
+    ? [
+        'http://localhost:30004', // Dashboard NodePort (dev)
+        'http://dashboard-service:80', // Dashboard ClusterIP (K8s)
+        // Ajoutez vos origines de production ici
+      ]
+    : [
+        'http://localhost:3001', // Dashboard en développement
+        'http://localhost:30004', // Dashboard NodePort
+        'http://dashboard-service:80', // Dashboard ClusterIP (K8s)
+        'http://localhost:3000', // Middleware en développement
+      ];
+
+const corsOptions = {
+  origin: function (origin, callback) {
+    // En développement, autoriser les requêtes sans origine (ex: Postman, curl)
+    if (process.env.NODE_ENV === 'development' && !origin) {
+      return callback(null, true);
+    }
+    
+    // Vérifier si l'origine est dans la liste autorisée
+    if (allowedOrigins.indexOf(origin) !== -1) {
+      callback(null, true);
+    } else {
+      // En développement, log warning mais autoriser (pour faciliter le dev)
+      if (process.env.NODE_ENV === 'development') {
+        console.warn(`CORS: Origine non autorisée mais autorisée en dev: ${origin}`);
+        callback(null, true);
+      } else {
+        // En production, refuser strictement
+        console.warn(`CORS: Origine non autorisée: ${origin}`);
+        callback(new Error('Non autorisé par la politique CORS'));
+      }
+    }
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+  exposedHeaders: ['X-Response-Time', 'X-CBS-Status'],
+  maxAge: 86400 // 24 heures
+};
+
+app.use(cors(corsOptions));
 
 // --- Axios Client for CBS ---
 const cbsClient = axios.create({
@@ -54,16 +104,16 @@ morgan.token('cbs-response-time', (req, res) => {
 morgan.token('cbs-status', (req, res) => res.getHeader('X-CBS-Status') || '-');
 
 // Custom token for trace ID
-morgan.token('traceid', (req, res) => {
+morgan.token('traceid', (_req, _res) => {
     const span = api.trace.getSpan(api.context.active());
-    if (!span) return '-';
+    if (!span) {return '-';}
     return span.spanContext().traceId;
 });
 
 // Custom token for span ID
-morgan.token('spanid', (req, res) => {
+morgan.token('spanid', (_req, _res) => {
     const span = api.trace.getSpan(api.context.active());
-    if (!span) return '-';
+    if (!span) {return '-';}
     return span.spanContext().spanId;
 });
 
@@ -291,7 +341,7 @@ app.get('/metrics', (req, res) => {
  *             schema:
  *               $ref: '#/components/schemas/Error'
  */
-app.get('/customers/:id', async (req, res) => {
+app.get('/customers/:id', validateCustomerId, async (req, res) => {
     const customerId = req.params.id;
     const tracer = api.trace.getTracer('middleware-tracer');
     const span = tracer.startSpan('cbs-request', { attributes: { 'cbs.method': 'getCustomer' } });
@@ -342,7 +392,7 @@ app.get('/customers/:id', async (req, res) => {
  *             schema:
  *               $ref: '#/components/schemas/Error'
  */
-app.get('/accounts/:id', async (req, res) => {
+app.get('/accounts/:id', validateAccountId, async (req, res) => {
     const accountId = req.params.id;
     const tracer = api.trace.getTracer('middleware-tracer');
     const span = tracer.startSpan('cbs-request', { attributes: { 'cbs.method': 'getAccount' } });
@@ -396,7 +446,7 @@ app.get('/accounts/:id', async (req, res) => {
  *             schema:
  *               $ref: '#/components/schemas/Error'
  */
-app.get('/accounts/:id/history', async (req, res) => {
+app.get('/accounts/:id/history', validateAccountId, async (req, res) => {
     const accountId = req.params.id;
     const tracer = api.trace.getTracer('middleware-tracer');
     const span = tracer.startSpan('cbs-request', { attributes: { 'cbs.method': 'getHistory' } });
@@ -452,7 +502,7 @@ app.get('/accounts/:id/history', async (req, res) => {
  *             schema:
  *               $ref: '#/components/schemas/Error'
  */
-app.post('/transfer', async (req, res) => {
+app.post('/transfer', validateTransfer, async (req, res) => {
     const { from, to, amount, description } = req.body;
     const tracer = api.trace.getTracer('middleware-tracer');
     const span = tracer.startSpan('cbs-request', { attributes: { 'cbs.method': 'transfer' } });
@@ -492,9 +542,10 @@ app.get('/', (req, res) => {
 });
 
 // Proxy to CBS Simulator - Account lookup (by accountNumber)
-app.get('/api/accounts/:accountNumber', async (req, res) => {
+app.get('/api/accounts/:accountNumber', validateAccountNumber, async (req, res) => {
     try {
         const { accountNumber } = req.params;
+        // eslint-disable-next-line no-console
         console.log(`Fetching account ${accountNumber} from CBS Simulator`);
     const response = await axios.get(`${process.env.CBS_SIMULATOR_URL || 'http://cbs-simulator-service:4000'}/api/accounts/${accountNumber}`, { timeout: 5000 });
         res.status(200).json(response.data);
@@ -508,9 +559,10 @@ app.get('/api/accounts/:accountNumber', async (req, res) => {
 });
 
 // Proxy to CBS Simulator - Transaction processing
-app.post('/api/transactions', async (req, res) => {
+app.post('/api/transactions', validateTransaction, async (req, res) => {
     try {
         const transaction = req.body;
+        // eslint-disable-next-line no-console
         console.log('Processing transaction:', transaction);
     const response = await axios.post(`${process.env.CBS_SIMULATOR_URL || 'http://cbs-simulator-service:4000'}/api/transactions`, transaction, { timeout: 5000 });
         res.status(201).json(response.data);
@@ -524,9 +576,10 @@ app.post('/api/transactions', async (req, res) => {
 });
 
 // Proxy to CBS Simulator - Balance inquiry
-app.get('/api/balance/:accountNumber', async (req, res) => {
+app.get('/api/balance/:accountNumber', validateAccountNumber, async (req, res) => {
     try {
         const { accountNumber } = req.params;
+        // eslint-disable-next-line no-console
         console.log(`Fetching balance for account ${accountNumber}`);
     const response = await axios.get(`${process.env.CBS_SIMULATOR_URL || 'http://cbs-simulator-service:4000'}/api/balance/${accountNumber}`, { timeout: 5000 });
         res.status(200).json(response.data);
@@ -542,21 +595,9 @@ app.get('/api/balance/:accountNumber', async (req, res) => {
 // Middleware-specific business logic endpoints
 
 // Validate transaction before sending to CBS
-app.post('/api/validate-transaction', async (req, res) => {
+app.post('/api/validate-transaction', validateTransactionValidation, (req, res) => {
     try {
         const transaction = req.body;
-        if (!transaction.amount || transaction.amount <= 0) {
-            return res.status(400).json({
-                error: 'Invalid transaction',
-                message: 'Amount must be greater than 0'
-            });
-        }
-        if (!transaction.accountNumber) {
-            return res.status(400).json({
-                error: 'Invalid transaction',
-                message: 'Account number is required'
-            });
-        }
         res.status(200).json({
             valid: true,
             message: 'Transaction is valid',
@@ -572,7 +613,7 @@ app.post('/api/validate-transaction', async (req, res) => {
 });
 
 // Example: Get transaction history (mocked)
-app.get('/api/transactions/:accountNumber', async (req, res) => {
+app.get('/api/transactions/:accountNumber', (req, res) => {
     try {
         const { accountNumber } = req.params;
         const transactions = [
@@ -608,7 +649,7 @@ app.get('/api/transactions/:accountNumber', async (req, res) => {
 });
 
 // Error handling middleware (after all routes)
-app.use((err, req, res, next) => {
+app.use((err, req, res, _next) => {
     console.error('Error:', err);
     res.status(500).json({
         error: 'Internal server error',
@@ -629,23 +670,34 @@ app.use((req, res) => {
 const PORT = process.env.PORT || port;
 const HOST = '0.0.0.0';
 app.listen(PORT, HOST, () => {
+    // eslint-disable-next-line no-console
     console.log(`========================================`);
+    // eslint-disable-next-line no-console
     console.log(`CBS Middleware Service Started`);
+    // eslint-disable-next-line no-console
     console.log(`========================================`);
+    // eslint-disable-next-line no-console
     console.log(`Port: ${PORT}`);
+    // eslint-disable-next-line no-console
     console.log(`Host: ${HOST}`);
+    // eslint-disable-next-line no-console
     console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
+    // eslint-disable-next-line no-console
     console.log(`CBS Simulator URL: ${process.env.CBS_SIMULATOR_URL || 'http://cbs-simulator-service:4000'}`);
+    // eslint-disable-next-line no-console
     console.log(`Time: ${new Date().toISOString()}`);
+    // eslint-disable-next-line no-console
     console.log(`========================================`);
 });
 
 // Graceful shutdown
 process.on('SIGTERM', () => {
+    // eslint-disable-next-line no-console
     console.log('SIGTERM received, shutting down gracefully...');
     process.exit(0);
 });
 process.on('SIGINT', () => {
+    // eslint-disable-next-line no-console
     console.log('SIGINT received, shutting down gracefully...');
     process.exit(0);
 });

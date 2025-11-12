@@ -1,0 +1,44 @@
+{
+  "serverId": "sonarqube",
+  "serverUrl": "http://192.168.90.136:9000",
+  "projectKey": "cbs-system",
+  "organizationKey": "",
+  "sqProjectKey": "cbs-system",
+  "sqProjectName": "CBS System",
+  "projectName": "CBS System",
+  "modules": [
+    {
+      "key": "cbs-system:middleware",
+      "path": "middleware"
+    },
+    {
+      "key": "cbs-system:cbs-simulator",
+      "path": "cbs-simulator"
+    },
+    {
+      "key": "cbs-system:dashboard",
+      "path": "dashboard"
+    }
+  ],
+  "bindings": [
+    {
+      "moduleKey": "cbs-system:middleware",
+      "sqProjectKey": "cbs-system",
+      "sqProjectName": "CBS System"
+    },
+    {
+      "moduleKey": "cbs-system:cbs-simulator",
+      "sqProjectKey": "cbs-system",
+      "sqProjectName": "CBS System"
+    },
+    {
+      "moduleKey": "cbs-system:dashboard",
+      "sqProjectKey": "cbs-system",
+      "sqProjectName": "CBS System"
+    }
+  ]
+}
+
+
+
+

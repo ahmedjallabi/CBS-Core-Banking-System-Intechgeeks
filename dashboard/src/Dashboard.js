@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { Layout, Card, Row, Col, Statistic, Progress, Alert, Spin, Tabs } from 'antd';
 import { 
   BankOutlined, 
@@ -21,7 +21,6 @@ import CustomerConsultation from './components/CustomerConsultation';
 import TransactionHistory from './components/TransactionHistory';
 
 const { Content } = Layout;
-const { TabPane } = Tabs;
 
 const SupervisionDashboard = () => {
   const [metrics, setMetrics] = useState(null);

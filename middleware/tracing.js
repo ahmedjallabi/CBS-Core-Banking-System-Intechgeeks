@@ -60,6 +60,7 @@ const sdk = new NodeSDK({
 // Démarrage du SDK
 sdk.start();
 
+// eslint-disable-next-line no-console
 console.log('OpenTelemetry configuré avec succès pour exporter vers ELK Stack');
 
 module.exports = sdk;

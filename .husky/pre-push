@@ -1,0 +1,34 @@
+#!/usr/bin/env sh
+. "$(dirname -- "$0")/_/husky.sh"
+
+echo "🔍 Running pre-push hooks..."
+
+# Run ESLint on all projects
+echo "📝 Running ESLint..."
+npm run lint || {
+  echo "❌ ESLint failed. Please fix the errors before pushing."
+  exit 1
+}
+
+# Run security scan
+echo "🔒 Running security scan..."
+if command -v gitleaks > /dev/null 2>&1; then
+  gitleaks detect --source . --verbose || {
+    echo "❌ Security scan failed. Please fix the issues before pushing."
+    exit 1
+  }
+else
+  echo "⚠️  Gitleaks not found. Skipping secret scan."
+fi
+
+# Run npm audit
+echo "🔍 Running npm audit..."
+npm run security:audit || {
+  echo "⚠️  npm audit found vulnerabilities. Please review them."
+}
+
+echo "✅ Pre-push hooks completed!"
+
+
+
+

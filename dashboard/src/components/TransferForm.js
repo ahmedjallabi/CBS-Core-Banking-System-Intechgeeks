@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { Card, Form, Input, InputNumber, Button, Alert, Spin, Descriptions, Tag, Divider } from 'antd';
 import { ArrowRightOutlined, CheckCircleOutlined, ExclamationCircleOutlined } from '@ant-design/icons';
 import { cbsAPI } from '../services/api';
@@ -82,8 +82,15 @@ const TransferForm = () => {
             step={0.01}
             precision={2}
             style={{ width: '300px' }}
-            formatter={value => `${value}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}
-            parser={value => value.replace(/\$\s?|(,*)/g, '')}
+            formatter={value => {
+              if (!value) return '';
+              // eslint-disable-next-line security/detect-unsafe-regex
+              return `${value}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+            }}
+            parser={value => {
+              if (!value) return '';
+              return value.replace(/\$\s?|(,*)/g, '');
+            }}
           />
         </Form.Item>
 

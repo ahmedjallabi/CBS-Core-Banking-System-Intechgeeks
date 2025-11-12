@@ -1,0 +1,41 @@
+# Configuration Gitleaks pour détecter les secrets dans le code
+# Documentation: https://github.com/gitleaks/gitleaks
+
+title = "CBS System - Gitleaks Configuration"
+
+# Utiliser les règles par défaut de Gitleaks
+# Les règles personnalisées seront ajoutées en plus des règles par défaut
+
+[allowlist]
+# Patterns à ignorer (faux positifs connus)
+description = "Allowlist pour exclure les faux positifs"
+
+paths = [
+    '''\.git/''',
+    '''node_modules/''',
+    '''\.env\.example''',
+    '''\.env\.template''',
+    '''SECURITY-GUIDE\.md''',
+    '''MANQUES-SECURITE-SHIFT-LEFT\.md''',
+    '''\.gitignore''',
+    '''package-lock\.json''',
+    '''docs/''',
+]
+
+# Ignorer les commentaires de documentation
+commits = [
+    '''fake.*key''',
+    '''example.*password''',
+    '''test.*secret''',
+]
+
+# Mots-clés à ignorer dans les commentaires
+regexes = [
+    '''example.*password''',
+    '''fake.*api.*key''',
+    '''test.*secret''',
+]
+
+# Note: Les règles par défaut de Gitleaks sont déjà activées
+# Si vous voulez ajouter des règles personnalisées, décommentez les sections [rule] ci-dessous
+

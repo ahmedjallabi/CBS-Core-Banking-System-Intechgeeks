@@ -1,4 +1,3 @@
-import React from 'react';
 import Dashboard from './Dashboard';
 import 'antd/dist/reset.css';
 import './App.css';

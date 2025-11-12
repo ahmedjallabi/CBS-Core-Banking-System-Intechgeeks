@@ -1,0 +1,29 @@
+#!/usr/bin/env sh
+. "$(dirname -- "$0")/_/husky.sh"
+
+# Validate commit message format
+commit_msg=$(cat "$1")
+
+# Check if commit message is not empty
+if [ -z "$commit_msg" ]; then
+  echo "❌ Commit message cannot be empty"
+  exit 1
+fi
+
+# Check commit message length
+if [ ${#commit_msg} -lt 10 ]; then
+  echo "❌ Commit message is too short (minimum 10 characters)"
+  exit 1
+fi
+
+# Check for common patterns (optional)
+if echo "$commit_msg" | grep -qE "^(feat|fix|docs|style|refactor|test|chore|security)(\(.+\))?:"; then
+  echo "✅ Commit message follows conventional format"
+else
+  echo "⚠️  Commit message doesn't follow conventional format (feat:, fix:, etc.)"
+  echo "   Consider using: feat:, fix:, docs:, style:, refactor:, test:, chore:, security:"
+fi
+
+
+
+

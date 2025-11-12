@@ -23,7 +23,10 @@ yarn-debug.log*
 !dashboard/.env
 
 # IDE and OS specific files
-.vscode/
+# .vscode/  # Commenté pour partager la configuration VS Code
 .idea/
 .DS_Store
-Thumbs.db 
+Thumbs.db
+
+# Husky
+.husky/_/ 

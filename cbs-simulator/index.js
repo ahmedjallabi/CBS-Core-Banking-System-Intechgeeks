@@ -1,5 +1,16 @@
+/* eslint-disable security/detect-object-injection */
+// Désactivation de la règle security/detect-object-injection car ce simulateur
+// utilise des accès dynamiques aux objets avec des données contrôlées et validées
+
 const express = require('express');
 const app = express();
+const { 
+    validateTransfer, 
+    validateAccountId, 
+    validateCustomerId,
+    validateTransaction,
+    validateAccountNumber
+} = require('./validators');
 
 // Use PORT from environment variable or default to 4000
 const port = process.env.PORT || 4000;
@@ -8,7 +19,6 @@ const host = '0.0.0.0'; // CRITICAL: Listen on all interfaces for Docker
 app.use(express.json());
 
 // --- Mock Data ---
-const now = new Date();
 let transactionCounter = 12; // Pour générer des ID de transaction uniques
 
 const customers = {
@@ -159,7 +169,7 @@ app.get('/health', (req, res) => {
 });
 
 // Get account by ID
-app.get('/cbs/account/:id', (req, res) => {
+app.get('/cbs/account/:id', validateAccountId, (req, res) => {
   const account = accounts[req.params.id];
   if (account) {
     res.json(account);
@@ -169,13 +179,8 @@ app.get('/cbs/account/:id', (req, res) => {
 });
 
 // Transfer between accounts
-app.post('/cbs/transfer', (req, res) => {
+app.post('/cbs/transfer', validateTransfer, (req, res) => {
   const { from, to, amount, description } = req.body;
-  
-  // Validation
-  if (!from || !to || !amount) {
-    return res.status(400).json({ error: 'Missing transfer details', required: ['from', 'to', 'amount'] });
-  }
 
   const fromAccount = accounts[from];
   const toAccount = accounts[to];
@@ -214,9 +219,13 @@ app.post('/cbs/transfer', (req, res) => {
     montant: amount,
   };
 
-  if (!history[from]) history[from] = [];
+  if (!history[from]) {
+    history[from] = [];
+  }
   history[from].push(debitTransaction);
-  if (!history[to]) history[to] = [];
+  if (!history[to]) {
+    history[to] = [];
+  }
   history[to].push(creditTransaction);
 
   res.status(200).json({ 
@@ -229,7 +238,7 @@ app.post('/cbs/transfer', (req, res) => {
 });
 
 // Get customer by ID with their accounts
-app.get('/cbs/customer/:id', (req, res) => {
+app.get('/cbs/customer/:id', validateCustomerId, (req, res) => {
   const customerId = req.params.id;
   const customer = customers[customerId];
   
@@ -244,7 +253,7 @@ app.get('/cbs/customer/:id', (req, res) => {
 });
 
 // Get account transaction history
-app.get('/cbs/account/:id/history', (req, res) => {
+app.get('/cbs/account/:id/history', validateAccountId, (req, res) => {
   const accountId = req.params.id;
   const accountHistory = history[accountId];
 
@@ -287,7 +296,7 @@ app.get('/cbs/accounts', (req, res) => {
 });
 
 // Additional endpoints for middleware compatibility
-app.get('/api/accounts/:accountNumber', (req, res) => {
+app.get('/api/accounts/:accountNumber', validateAccountNumber, (req, res) => {
   const account = accounts[req.params.accountNumber];
   if (account) {
     res.json(account);
@@ -296,7 +305,7 @@ app.get('/api/accounts/:accountNumber', (req, res) => {
   }
 });
 
-app.get('/api/balance/:accountNumber', (req, res) => {
+app.get('/api/balance/:accountNumber', validateAccountNumber, (req, res) => {
   const account = accounts[req.params.accountNumber];
   if (account) {
     res.json({ 
@@ -309,15 +318,8 @@ app.get('/api/balance/:accountNumber', (req, res) => {
   }
 });
 
-app.post('/api/transactions', (req, res) => {
+app.post('/api/transactions', validateTransaction, (req, res) => {
   const { accountNumber, amount, type, description } = req.body;
-  
-  if (!accountNumber || !amount || !type) {
-    return res.status(400).json({ 
-      error: 'Missing required fields', 
-      required: ['accountNumber', 'amount', 'type'] 
-    });
-  }
 
   const account = accounts[accountNumber];
   if (!account) {
@@ -348,7 +350,9 @@ app.post('/api/transactions', (req, res) => {
     montant: type === 'credit' ? amount : -amount,
   };
 
-  if (!history[accountNumber]) history[accountNumber] = [];
+  if (!history[accountNumber]) {
+    history[accountNumber] = [];
+  }
   history[accountNumber].push(transaction);
 
   res.status(201).json({
@@ -359,7 +363,7 @@ app.post('/api/transactions', (req, res) => {
 });
 
 // Error handling middleware
-app.use((err, req, res, next) => {
+app.use((err, req, res, _next) => {
   console.error('Error:', err);
   res.status(500).json({
     error: 'Internal server error',
@@ -378,37 +382,61 @@ app.use((req, res) => {
 
 // Start server
 app.listen(port, host, () => {
+  // eslint-disable-next-line no-console
   console.log('========================================');
+  // eslint-disable-next-line no-console
   console.log('CBS Simulator Service Started');
+  // eslint-disable-next-line no-console
   console.log('========================================');
+  // eslint-disable-next-line no-console
   console.log(`Host: ${host}`);
+  // eslint-disable-next-line no-console
   console.log(`Port: ${port}`);
+  // eslint-disable-next-line no-console
   console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
+  // eslint-disable-next-line no-console
   console.log(`Time: ${new Date().toISOString()}`);
+  // eslint-disable-next-line no-console
   console.log('========================================');
+  // eslint-disable-next-line no-console
   console.log('Available endpoints:');
+  // eslint-disable-next-line no-console
   console.log('  GET  /                     - Health check');
+  // eslint-disable-next-line no-console
   console.log('  GET  /health               - Health status');
+  // eslint-disable-next-line no-console
   console.log('  GET  /cbs/customers        - List all customers');
+  // eslint-disable-next-line no-console
   console.log('  GET  /cbs/accounts         - List all accounts');
+  // eslint-disable-next-line no-console
   console.log('  GET  /cbs/customer/:id     - Get customer details');
+  // eslint-disable-next-line no-console
   console.log('  GET  /cbs/account/:id      - Get account details');
+  // eslint-disable-next-line no-console
   console.log('  GET  /cbs/account/:id/history - Get account history');
+  // eslint-disable-next-line no-console
   console.log('  GET  /cbs/history/:id      - Get account with history');
+  // eslint-disable-next-line no-console
   console.log('  POST /cbs/transfer         - Transfer between accounts');
+  // eslint-disable-next-line no-console
   console.log('  GET  /api/accounts/:accountNumber - Get account by number');
+  // eslint-disable-next-line no-console
   console.log('  GET  /api/balance/:accountNumber  - Get account balance');
+  // eslint-disable-next-line no-console
   console.log('  POST /api/transactions     - Process transaction');
+  // eslint-disable-next-line no-console
   console.log('========================================');
 });
 
 // Graceful shutdown
 process.on('SIGTERM', () => {
+  // eslint-disable-next-line no-console
   console.log('SIGTERM received, shutting down gracefully...');
   process.exit(0);
 });
 
 process.on('SIGINT', () => {
+  // eslint-disable-next-line no-console
   console.log('SIGINT received, shutting down gracefully...');
   process.exit(0);
 });

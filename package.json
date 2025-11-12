@@ -3,10 +3,20 @@
   "version": "1.0.0",
   "description": "Monorepo for CBS Middleware services",
   "scripts": {
-    "start": "concurrently \"npm start --prefix middleware\" \"npm start --prefix cbs-simulator\" \"npm start --prefix dashboard\""
+    "start": "concurrently \"npm start --prefix middleware\" \"npm start --prefix cbs-simulator\" \"npm start --prefix dashboard\"",
+    "lint": "npm run lint --prefix middleware && npm run lint --prefix cbs-simulator && npm run lint --prefix dashboard",
+    "lint:fix": "npm run lint:fix --prefix middleware && npm run lint:fix --prefix cbs-simulator && npm run lint:fix --prefix dashboard",
+    "security:scan": "gitleaks detect --source . --verbose",
+    "security:scan-staged": "gitleaks detect --no-git --source . --verbose",
+    "security:protect": "gitleaks protect --verbose",
+    "security:audit": "npm audit --audit-level=moderate",
+    "security:audit-fix": "npm audit fix"
   },
   "devDependencies": {
-    "concurrently": "^9.2.0"
+    "concurrently": "^9.2.0",
+    "eslint": "^8.57.1",
+    "husky": "^9.0.11",
+    "lint-staged": "^15.2.2"
   },
   "dependencies": {
     "@opentelemetry/exporter-trace-otlp-grpc": "^0.203.0"

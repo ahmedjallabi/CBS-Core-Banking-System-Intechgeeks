@@ -202,3 +202,8 @@ Les problèmes d'accessibilité peuvent être résolus en :
 4. ✅ Vérifiant la configuration réseau du cluster
 
 Le système devrait être accessible via les services NodePort sur les ports 30003, 30004, et 30005.
+
+
+
+
+
