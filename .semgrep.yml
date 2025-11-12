@@ -1,0 +1,305 @@
+# Configuration Semgrep pour la détection de vulnérabilités de sécurité
+# Documentation: https://semgrep.dev/docs/
+
+rules:
+  # ============================================
+  # RÈGLES DE SÉCURITÉ - OWASP Top 10
+  # ============================================
+
+  # Injection (A03:2021)
+  - id: detect-sql-injection
+    pattern: |
+      $QUERY = "SELECT * FROM $TABLE WHERE $CONDITION"
+    message: "Possible SQL injection detected. Use parameterized queries."
+    languages: [javascript, typescript]
+    severity: ERROR
+    metadata:
+      category: security
+      owasp: "A03:2021 - Injection"
+      cwe: "CWE-89: SQL Injection"
+
+  - id: detect-command-injection
+    patterns:
+      - pattern-either:
+          - pattern: exec($CMD)
+          - pattern: execSync($CMD)
+          - pattern: spawn($CMD, ...)
+          - pattern: execFile($CMD, ...)
+    message: "Command injection risk. Validate and sanitize user input before executing commands."
+    languages: [javascript, typescript]
+    severity: ERROR
+    metadata:
+      category: security
+      owasp: "A03:2021 - Injection"
+      cwe: "CWE-78: OS Command Injection"
+
+  - id: detect-eval-usage
+    patterns:
+      - pattern-either:
+          - pattern: eval($EXPR)
+          - pattern: Function($EXPR)
+          - pattern: new Function($EXPR)
+    message: "Use of eval() or Function() constructor is dangerous and can lead to code injection."
+    languages: [javascript, typescript]
+    severity: ERROR
+    metadata:
+      category: security
+      owasp: "A03:2021 - Injection"
+      cwe: "CWE-95: Improper Neutralization of Directives in Dynamically Evaluated Code"
+
+  # Broken Authentication (A02:2021)
+  - id: detect-weak-crypto
+    patterns:
+      - pattern-either:
+          - pattern: crypto.createHash("md5")
+          - pattern: crypto.createHash("sha1")
+          - pattern: crypto.createHash("sha256")
+          - pattern: crypto.pbkdf2(..., 1000, ...)
+    message: "Weak cryptographic algorithm or insufficient iterations. Use stronger algorithms (SHA-256+, bcrypt, scrypt) with sufficient iterations."
+    languages: [javascript, typescript]
+    severity: WARNING
+    metadata:
+      category: security
+      owasp: "A02:2021 - Cryptographic Failures"
+      cwe: "CWE-327: Use of a Broken or Risky Cryptographic Algorithm"
+
+  - id: detect-hardcoded-secrets
+    patterns:
+      - pattern-either:
+          - pattern: password = "..."
+          - pattern: apiKey = "..."
+          - pattern: secret = "..."
+          - pattern: token = "..."
+          - pattern: $VAR = "sk-..."
+          - pattern: $VAR = "AKIA..."
+    message: "Hardcoded secret detected. Use environment variables or secret management services."
+    languages: [javascript, typescript]
+    severity: ERROR
+    metadata:
+      category: security
+      owasp: "A07:2021 - Identification and Authentication Failures"
+      cwe: "CWE-798: Use of Hard-coded Credentials"
+
+  # Sensitive Data Exposure (A03:2021)
+  - id: detect-logging-secrets
+    patterns:
+      - pattern-either:
+          - pattern: console.log($SECRET)
+          - pattern: console.info($SECRET)
+          - pattern: logger.log($SECRET)
+    message: "Sensitive data logged. Avoid logging passwords, tokens, or other secrets."
+    languages: [javascript, typescript]
+    severity: WARNING
+    metadata:
+      category: security
+      owasp: "A01:2021 - Broken Access Control"
+      cwe: "CWE-532: Insertion of Sensitive Information into Log File"
+
+  # XML External Entities (XXE) - A05:2021
+  - id: detect-xxe
+    patterns:
+      - pattern: xmlParser.parse($INPUT)
+    message: "XML parsing without proper configuration can lead to XXE attacks. Disable external entity processing."
+    languages: [javascript, typescript]
+    severity: WARNING
+    metadata:
+      category: security
+      owasp: "A05:2021 - Security Misconfiguration"
+      cwe: "CWE-611: Improper Restriction of XML External Entity Reference"
+
+  # Security Misconfiguration (A05:2021)
+  - id: detect-cors-wildcard
+    patterns:
+      - pattern-either:
+          - pattern: cors({ origin: "*" })
+          - pattern: cors({ origin: true })
+          - pattern: cors({ origin: $ANY })
+    message: "CORS configured to accept all origins. Restrict to specific trusted origins."
+    languages: [javascript, typescript]
+    severity: ERROR
+    metadata:
+      category: security
+      owasp: "A05:2021 - Security Misconfiguration"
+      cwe: "CWE-942: Permissive Cross-domain Policy with Untrusted Domains"
+
+  - id: detect-no-helmet
+    pattern: |
+      const app = express();
+      ...
+      // Missing helmet() middleware
+    message: "Consider using helmet() middleware to set secure HTTP headers."
+    languages: [javascript, typescript]
+    severity: INFO
+    metadata:
+      category: security
+      owasp: "A05:2021 - Security Misconfiguration"
+
+  # Cross-Site Scripting (XSS) - A03:2021
+  - id: detect-xss-react
+    patterns:
+      - pattern: dangerouslySetInnerHTML={{ __html: $HTML }}
+    message: "Use of dangerouslySetInnerHTML can lead to XSS attacks. Sanitize HTML or use safer alternatives."
+    languages: [javascript, typescript, jsx]
+    severity: ERROR
+    metadata:
+      category: security
+      owasp: "A03:2021 - Injection"
+      cwe: "CWE-79: Cross-site Scripting"
+
+  - id: detect-xss-dom
+    patterns:
+      - pattern-either:
+          - pattern: $ELEMENT.innerHTML = $USER_INPUT
+          - pattern: $ELEMENT.outerHTML = $USER_INPUT
+          - pattern: document.write($USER_INPUT)
+    message: "Direct DOM manipulation with user input can lead to XSS. Use textContent or sanitize input."
+    languages: [javascript, typescript]
+    severity: ERROR
+    metadata:
+      category: security
+      owasp: "A03:2021 - Injection"
+      cwe: "CWE-79: Cross-site Scripting"
+
+  # Insecure Deserialization (A08:2021)
+  - id: detect-insecure-deserialization
+    patterns:
+      - pattern-either:
+          - pattern: JSON.parse($UNTRUSTED)
+          - pattern: eval($UNTRUSTED)
+    message: "Deserializing untrusted data can lead to code injection. Validate and sanitize input."
+    languages: [javascript, typescript]
+    severity: WARNING
+    metadata:
+      category: security
+      owasp: "A08:2021 - Software and Data Integrity Failures"
+      cwe: "CWE-502: Deserialization of Untrusted Data"
+
+  # Using Components with Known Vulnerabilities (A06:2021)
+  - id: detect-old-crypto
+    patterns:
+      - pattern-either:
+          - pattern: require("crypto").createCipher(...)
+          - pattern: require("crypto").createDecipher(...)
+    message: "Deprecated crypto methods. Use createCipheriv() and createDecipheriv() instead."
+    languages: [javascript, typescript]
+    severity: ERROR
+    metadata:
+      category: security
+      owasp: "A06:2021 - Vulnerable and Outdated Components"
+      cwe: "CWE-327: Use of a Broken or Risky Cryptographic Algorithm"
+
+  # ============================================
+  # RÈGLES SPÉCIFIQUES NODE.JS / EXPRESS
+  # ============================================
+
+  - id: detect-no-input-validation
+    pattern: |
+      app.$METHOD("$PATH", $HANDLER)
+      ...
+      // Missing input validation
+    message: "API endpoint missing input validation. Use express-validator or joi to validate user input."
+    languages: [javascript, typescript]
+    severity: WARNING
+    metadata:
+      category: security
+      cwe: "CWE-20: Improper Input Validation"
+
+  - id: detect-no-rate-limiting
+    pattern: |
+      const app = express();
+      ...
+      // Missing rate limiting middleware
+    message: "Consider adding rate limiting middleware to prevent brute force and DoS attacks."
+    languages: [javascript, typescript]
+    severity: INFO
+    metadata:
+      category: security
+      cwe: "CWE-307: Improper Restriction of Excessive Authentication Attempts"
+
+  - id: detect-no-csrf-protection
+    pattern: |
+      app.use(cookieParser());
+      ...
+      // Missing CSRF protection
+    message: "Consider adding CSRF protection middleware when using cookies for authentication."
+    languages: [javascript, typescript]
+    severity: WARNING
+    metadata:
+      category: security
+      owasp: "A01:2021 - Broken Access Control"
+      cwe: "CWE-352: Cross-Site Request Forgery"
+
+  - id: detect-unsafe-file-operations
+    patterns:
+      - pattern-either:
+          - pattern: fs.readFile($USER_INPUT, ...)
+          - pattern: fs.writeFile($USER_INPUT, ...)
+          - pattern: fs.unlink($USER_INPUT, ...)
+    message: "File operations with user input can lead to path traversal attacks. Validate and sanitize file paths."
+    languages: [javascript, typescript]
+    severity: ERROR
+    metadata:
+      category: security
+      cwe: "CWE-22: Improper Limitation of a Pathname to a Restricted Directory (Path Traversal)"
+
+  # ============================================
+  # RÈGLES DE BONNES PRATIQUES
+  # ============================================
+
+  - id: detect-console-log-in-production
+    patterns:
+      - pattern-either:
+          - pattern: console.log(...)
+          - pattern: console.debug(...)
+    message: "Avoid console.log in production code. Use a proper logging library."
+    languages: [javascript, typescript]
+    severity: INFO
+    metadata:
+      category: best-practice
+
+  - id: detect-empty-catch
+    pattern: |
+      try {
+        ...
+      } catch ($E) {
+        // Empty catch block
+      }
+    message: "Empty catch block can hide errors. At least log the error."
+    languages: [javascript, typescript]
+    severity: WARNING
+    metadata:
+      category: best-practice
+
+  - id: detect-promise-without-catch
+    pattern: |
+      $PROMISE.then(...)
+      // Missing .catch()
+    message: "Promise without catch handler. Always handle promise rejections."
+    languages: [javascript, typescript]
+    severity: WARNING
+    metadata:
+      category: best-practice
+
+# ============================================
+# EXCLUSIONS (faux positifs connus)
+# ============================================
+exclude:
+  - "node_modules"
+  - "dist"
+  - "build"
+  - "*.min.js"
+  - "coverage"
+  - ".git"
+  - "package-lock.json"
+  - "yarn.lock"
+
+# ============================================
+# CONFIGURATION
+# ============================================
+# Pour exécuter Semgrep:
+# semgrep --config=.semgrep.yml .
+#
+# Ou avec npm:
+# npm install -g @semgrep/cli
+# semgrep --config=.semgrep.yml .
+

@@ -36,7 +36,13 @@
       "sqProjectKey": "cbs-system",
       "sqProjectName": "CBS System"
     }
-  ]
+  ],
+  "sonarLintVersion": "10.0.0",
+  "sonarQubeVersion": "10.0.0",
+  "connectedMode": {
+    "sonarQubeConnectionName": "sonarqube",
+    "sonarCloudOrganization": ""
+  }
 }
 
 

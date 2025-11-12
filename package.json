@@ -10,7 +10,9 @@
     "security:scan-staged": "gitleaks detect --no-git --source . --verbose",
     "security:protect": "gitleaks protect --verbose",
     "security:audit": "npm audit --audit-level=moderate",
-    "security:audit-fix": "npm audit fix"
+    "security:audit-fix": "npm audit fix",
+    "security:semgrep": "semgrep --config=.semgrep.yml .",
+    "security:semgrep-json": "semgrep --config=.semgrep.yml --json ."
   },
   "devDependencies": {
     "concurrently": "^9.2.0",
