@@ -1,4 +1,6 @@
+# ===========================
 # Build stage
+# ===========================
 FROM node:20-alpine AS builder
 
 # Set working directory
@@ -22,10 +24,15 @@ COPY . .
 ARG REACT_APP_API_URL
 ENV REACT_APP_API_URL=$REACT_APP_API_URL
 
+# Désactiver ESLint pendant le build pour éviter les erreurs de plugin manquant
+ENV DISABLE_ESLINT_PLUGIN=true
+
 # Build React app
 RUN npm run build
 
+# ===========================
 # Production stage
+# ===========================
 FROM nginx:1.25-alpine
 
 # Copy built files from builder
