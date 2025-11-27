@@ -91,6 +91,7 @@ docker run --rm \
 
               // simple container smoke test (use different host port per app)
               def hostPort = 8080 + idx
+              // For non-dashboard apps the internal port might not be 80; adapt if needed.
               sh "docker run --rm -d --name test-${app} -p ${hostPort}:80 ${env.DOCKER_REGISTRY}/${app}:${imageTag} || true"
               sh 'sleep 5'
               sh "curl -f http://localhost:${hostPort} || echo 'Health check failed for ${app} on port ${hostPort}'"
@@ -146,10 +147,11 @@ docker run --rm \
             }
 
             echo '=== Deployment Summary ==='
+            // Use safe custom-columns to avoid jsonpath quoting issues
             sh """
-kubectl get services -n ${env.K8S_NAMESPACE}
-kubectl get pods -n ${env.K8S_NAMESPACE} -o wide
-kubectl get deployments -n ${env.K8S_NAMESPACE} -o custom-columns=NAME:.metadata.name,IMAGE:.spec.template.spec.containers[0].image --no-headers
+kubectl get services -n ${env.K8S_NAMESPACE} || true
+kubectl get pods -n ${env.K8S_NAMESPACE} -o wide || true
+kubectl get deployments -n ${env.K8S_NAMESPACE} -o custom-columns=NAME:.metadata.name,IMAGE:.spec.template.spec.containers[0].image --no-headers || true
 """
           } catch (Exception e) {
             echo '=== DEPLOYMENT FAILED - Gathering Debug INFORMATION ==='
@@ -158,10 +160,15 @@ kubectl get all -n ${env.K8S_NAMESPACE} || true
 kubectl describe deployments -n ${env.K8S_NAMESPACE} || true
 kubectl describe pods -n ${env.K8S_NAMESPACE} || true
 kubectl get events -n ${env.K8S_NAMESPACE} --sort-by='.lastTimestamp' --field-selector type!=Normal || true
+
+# get pod names in a safe way (jsonpath inside single quotes)
 for pod in $(kubectl get pods -n ${env.K8S_NAMESPACE} -o jsonpath='{.items[*].metadata.name}'); do
   echo \"--- Logs for $pod ---\"
   kubectl logs $pod -n ${env.K8S_NAMESPACE} --tail=100 --all-containers=true || true
+  echo ""
 done
+
+# metrics plugin may be absent — don't fail the script
 kubectl top nodes || true
 kubectl describe nodes || true
 """
@@ -174,10 +181,10 @@ kubectl describe nodes || true
     stage('Verify Deployment Health') {
       steps {
         script {
-          sh '''
+          sh """#!/bin/bash
 sleep 15
-RUNNING_PODS=$(kubectl get pods -n ${K8S_NAMESPACE} --field-selector=status.phase=Running --no-headers | wc -l)
-TOTAL_PODS=$(kubectl get pods -n ${K8S_NAMESPACE} --no-headers | wc -l)
+RUNNING_PODS=$(kubectl get pods -n ${env.K8S_NAMESPACE} --field-selector=status.phase=Running --no-headers | wc -l)
+TOTAL_PODS=$(kubectl get pods -n ${env.K8S_NAMESPACE} --no-headers | wc -l)
 echo "Running Pods: $RUNNING_PODS / $TOTAL_PODS"
 if [ "$RUNNING_PODS" -eq 0 ]; then
   echo "ERROR: No pods are running!"
@@ -188,7 +195,7 @@ curl -f -s -o /dev/null -w "Dashboard (port 30004): HTTP %{http_code}\n" http://
 curl -f -s -o /dev/null -w "Middleware (port 30003): HTTP %{http_code}\n" http://${MASTER_IP}:30003 || echo "Middleware: Not accessible"
 curl -f -s -o /dev/null -w "Middleware Health: HTTP %{http_code}\n" http://${MASTER_IP}:30003/health || echo "Middleware /health: Not accessible"
 curl -f -s -o /dev/null -w "Simulator (port 30005): HTTP %{http_code}\n" http://${MASTER_IP}:30005 || echo "Simulator: Not accessible"
-'''
+"""
         }
       }
     }
@@ -200,12 +207,12 @@ curl -f -s -o /dev/null -w "Simulator (port 30005): HTTP %{http_code}\n" http://
             withCredentials([string(credentialsId: 'owasp-zap-api-key', variable: 'ZAP_API_KEY')]) {
               sh '''
 set -eux
-export ZAP_HOST=${env.ZAP_HOST}
-export ZAP_PORT=${env.ZAP_PORT}
+export ZAP_HOST=${ZAP_HOST}
+export ZAP_PORT=${ZAP_PORT}
 sleep 5
-curl -v "http://$ZAP_HOST:$ZAP_PORT/JSON/spider/action/scan/?apikey=${ZAP_API_KEY}&url=http://${env.WORKER1_IP}:30004" || true
+curl -v "http://$ZAP_HOST:$ZAP_PORT/JSON/spider/action/scan/?apikey=${ZAP_API_KEY}&url=http://${WORKER1_IP}:30004" || true
 sleep 30
-curl -v "http://$ZAP_HOST:$ZAP_PORT/JSON/ascan/action/scan/?apikey=${ZAP_API_KEY}&url=http://${env.WORKER1_IP}:30004" || true
+curl -v "http://$ZAP_HOST:$ZAP_PORT/JSON/ascan/action/scan/?apikey=${ZAP_API_KEY}&url=http://${WORKER1_IP}:30004" || true
 sleep 60
 curl -v "http://$ZAP_HOST:$ZAP_PORT/OTHER/core/other/htmlreport/?apikey=${ZAP_API_KEY}" -o owasp-zap-report.html || true
 '''
