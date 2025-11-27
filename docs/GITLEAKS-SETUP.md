@@ -191,3 +191,4 @@ gitleaks detect --path ./path/to/file.js --verbose
 
 
 
+

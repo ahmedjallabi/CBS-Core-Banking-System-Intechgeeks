@@ -36,13 +36,11 @@ pipeline {
         stage('Code Quality Analysis (SonarQube)') {
             steps {
                 script {
-                    // Assurez-vous que le token SonarQube est défini dans Jenkins Credentials avec l'ID 'sonarqube'
                     withCredentials([string(credentialsId: 'sonarqube', variable: 'SONAR_TOKEN')]) {
                         sh """
                             #!/bin/bash
                             echo "🔗 SonarQube URL: http://192.168.90.136:9000"
 
-                            # Utiliser le container officiel du scanner
                             docker run --rm \
                                 -v \$(pwd):/usr/src \
                                 -e SONAR_HOST_URL=http://192.168.90.136:9000 \
@@ -73,6 +71,7 @@ pipeline {
                 }
             }
         }
+
         stage('Docker Build & Push') {
             steps {
                 withDockerRegistry(credentialsId: 'docker-hub-creds', url: 'https://index.docker.io/v1/') {
@@ -81,11 +80,11 @@ pipeline {
                         apps.each { app ->
                             echo "Building ${app}..."
                             if (app == 'dashboard') {
-                                // Pass REACT_APP_API_URL as build-arg for React (use NodePort for external access)
+                                // Use internal cluster service for API to avoid CORS issues
                                 sh """
                                 docker build --no-cache \
                                     -t ${DOCKER_REGISTRY}/${app}:latest \
-                                    --build-arg REACT_APP_API_URL=http://${MASTER_IP}:30003 \
+                                    --build-arg REACT_APP_API_URL=http://middleware:3000 \
                                     ./${app}
                                 """
                             } else {
@@ -109,7 +108,6 @@ pipeline {
                 }
             }
         }
-
 
         stage('Image Security Scan (Trivy)') {
             steps {
@@ -163,28 +161,28 @@ pipeline {
                     } catch (Exception e) {
                         echo "=== DEPLOYMENT FAILED - Gathering Debug Information ==="
                         sh """
-                        echo "=== All Resources in Namespace ==="
-                        kubectl get all -n ${K8S_NAMESPACE} || true
-                        echo ""
-                        echo "=== Deployment Details ==="
-                        kubectl describe deployments -n ${K8S_NAMESPACE} || true
-                        echo ""
-                        echo "=== Pod Details ==="
-                        kubectl describe pods -n ${K8S_NAMESPACE} || true
-                        echo ""
-                        echo "=== Recent Events ==="
-                        kubectl get events -n ${K8S_NAMESPACE} --sort-by='.lastTimestamp' --field-selector type!=Normal || true
-                        echo ""
-                        echo "=== Pod Logs ==="
-                        for pod in \$(kubectl get pods -n ${K8S_NAMESPACE} -o jsonpath='{.items[*].metadata.name}'); do
-                            echo "--- Logs for \$pod ---"
-                            kubectl logs \$pod -n ${K8S_NAMESPACE} --tail=100 --all-containers=true || true
+                            echo "=== All Resources in Namespace ==="
+                            kubectl get all -n ${K8S_NAMESPACE} || true
                             echo ""
-                        done
-                        echo ""
-                        echo "=== Node Status ==="
-                        kubectl top nodes || true
-                        kubectl describe nodes || true
+                            echo "=== Deployment Details ==="
+                            kubectl describe deployments -n ${K8S_NAMESPACE} || true
+                            echo ""
+                            echo "=== Pod Details ==="
+                            kubectl describe pods -n ${K8S_NAMESPACE} || true
+                            echo ""
+                            echo "=== Recent Events ==="
+                            kubectl get events -n ${K8S_NAMESPACE} --sort-by='.lastTimestamp' --field-selector type!=Normal || true
+                            echo ""
+                            echo "=== Pod Logs ==="
+                            for pod in \$(kubectl get pods -n ${K8S_NAMESPACE} -o jsonpath='{.items[*].metadata.name}'); do
+                                echo "--- Logs for \$pod ---"
+                                kubectl logs \$pod -n ${K8S_NAMESPACE} --tail=100 --all-containers=true || true
+                                echo ""
+                            done
+                            echo ""
+                            echo "=== Node Status ==="
+                            kubectl top nodes || true
+                            kubectl describe nodes || true
                         """
                         error("Deployment failed: ${e.message}")
                     }
@@ -274,4 +272,3 @@ pipeline {
         }
     }
 }
-
