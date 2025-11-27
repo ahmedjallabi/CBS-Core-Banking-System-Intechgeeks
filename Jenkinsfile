@@ -120,63 +120,74 @@ docker run --rm \
     }
 
     stage('Deployment to Test Env') {
-      steps {
-        script {
-          try {
-            // ensure we have manifests from repo before applying
-            checkout scm
-
-            echo '=== Creating/Verifying Namespace ==='
-            sh "kubectl create namespace ${env.K8S_NAMESPACE} --dry-run=client -o yaml | kubectl apply -f -"
-
-            echo '=== Deleting Existing Deployments ==='
-            sh "kubectl delete deployment cbs-simulator middleware dashboard -n ${env.K8S_NAMESPACE} --ignore-not-found=true"
-
-            sh 'sleep 15'
-
-            echo '=== Applying New Deployments ==='
-            sh 'kubectl apply -f kubernetes/deploy-all.yaml'
-
-            def apps = ['cbs-simulator', 'middleware', 'dashboard']
-            apps.each { app ->
-              echo "Checking rollout status for: ${app}"
-              timeout(time: 6, unit: 'MINUTES') {
-                sh "kubectl rollout status deployment/${app} -n ${env.K8S_NAMESPACE} --timeout=300s"
-              }
-              echo "✓ ${app} deployment successful"
+            steps {
+                script {
+                    try {
+                        echo "=== Creating/Verifying Namespace ==="
+                        sh "kubectl create namespace ${K8S_NAMESPACE} --dry-run=client -o yaml | kubectl apply -f -"
+                        
+                        echo "=== Deleting Existing Deployments ==="
+                        sh "kubectl delete deployment cbs-simulator middleware dashboard -n ${K8S_NAMESPACE} --ignore-not-found=true"
+                        
+                        echo "=== Waiting for Pod Termination ==="
+                        sh "sleep 15"
+                        
+                        echo "=== Applying New Deployments ==="
+                        sh "kubectl apply -f kubernetes/deploy-all.yaml"
+                        
+                        echo "=== Waiting for Deployments to be Ready ==="
+                        def apps = ['cbs-simulator', 'middleware', 'dashboard']
+                        apps.each { app ->
+                            echo "Checking rollout status for: ${app}"
+                            timeout(time: 6, unit: 'MINUTES') {
+                                sh "kubectl rollout status deployment/${app} -n ${K8S_NAMESPACE} --timeout=300s"
+                            }
+                            echo "✓ ${app} deployment successful"
+                        }
+                        
+                        echo "=== Deployment Summary ==="
+                        sh """
+                            echo "Services:"
+                            kubectl get services -n ${K8S_NAMESPACE}
+                            echo ""
+                            echo "Pods:"
+                            kubectl get pods -n ${K8S_NAMESPACE} -o wide
+                            echo ""
+                            echo "Images in use:"
+                            kubectl get deployments -n ${K8S_NAMESPACE} -o jsonpath='{range .items[*]}{.metadata.name}{": "}{.spec.template.spec.containers[0].image}{"\\n"}{end}'
+                        """
+                    } catch (Exception e) {
+                        echo "=== DEPLOYMENT FAILED - Gathering Debug Information ==="
+                        sh """
+                            echo "=== All Resources in Namespace ==="
+                            kubectl get all -n ${K8S_NAMESPACE} || true
+                            echo ""
+                            echo "=== Deployment Details ==="
+                            kubectl describe deployments -n ${K8S_NAMESPACE} || true
+                            echo ""
+                            echo "=== Pod Details ==="
+                            kubectl describe pods -n ${K8S_NAMESPACE} || true
+                            echo ""
+                            echo "=== Recent Events ==="
+                            kubectl get events -n ${K8S_NAMESPACE} --sort-by='.lastTimestamp' --field-selector type!=Normal || true
+                            echo ""
+                            echo "=== Pod Logs ==="
+                            for pod in \$(kubectl get pods -n ${K8S_NAMESPACE} -o jsonpath='{.items[*].metadata.name}'); do
+                                echo "--- Logs for \$pod ---"
+                                kubectl logs \$pod -n ${K8S_NAMESPACE} --tail=100 --all-containers=true || true
+                                echo ""
+                            done
+                            echo ""
+                            echo "=== Node Status ==="
+                            kubectl top nodes || true
+                            kubectl describe nodes || true
+                        """
+                        error("Deployment failed: ${e.message}")
+                    }
+                }
             }
-
-            echo '=== Deployment Summary ==='
-            // Use safe custom-columns to avoid jsonpath quoting issues
-            sh """
-kubectl get services -n ${env.K8S_NAMESPACE} || true
-kubectl get pods -n ${env.K8S_NAMESPACE} -o wide || true
-kubectl get deployments -n ${env.K8S_NAMESPACE} -o custom-columns=NAME:.metadata.name,IMAGE:.spec.template.spec.containers[0].image --no-headers || true
-"""
-          } catch (Exception e) {
-            echo '=== DEPLOYMENT FAILED - Gathering Debug INFORMATION ==='
-            sh """
-kubectl get all -n ${env.K8S_NAMESPACE} || true
-kubectl describe deployments -n ${env.K8S_NAMESPACE} || true
-kubectl describe pods -n ${env.K8S_NAMESPACE} || true
-kubectl get events -n ${env.K8S_NAMESPACE} --sort-by='.lastTimestamp' --field-selector type!=Normal || true
-
-# get pod names in a safe way (jsonpath inside single quotes)
-for pod in $(kubectl get pods -n ${env.K8S_NAMESPACE} -o jsonpath='{.items[*].metadata.name}'); do
-  echo \"--- Logs for $pod ---\"
-  kubectl logs $pod -n ${env.K8S_NAMESPACE} --tail=100 --all-containers=true || true
-  echo ""
-done
-
-# metrics plugin may be absent — don't fail the script
-kubectl top nodes || true
-kubectl describe nodes || true
-"""
-            error("Deployment failed: ${e.message}")
-          }
         }
-      }
-    }
+
 
     stage('Verify Deployment Health') {
       steps {
