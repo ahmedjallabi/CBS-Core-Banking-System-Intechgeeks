@@ -2,18 +2,11 @@
     agent any
 
     environment {
-        // Docker
         DOCKER_REGISTRY = 'ahm2022'
-
-        // Kubernetes
         K8S_NAMESPACE = 'cbs-system'
         KUBECONFIG = '/var/lib/jenkins/.kube/config'
-
-        // OWASP ZAP
         ZAP_HOST = '192.168.90.136'
         ZAP_PORT = '8090'
-
-        // Cluster IPs
         MASTER_IP = '192.168.90.136'
         WORKER1_IP = '192.168.90.128'
         WORKER2_IP = '192.168.90.129'
@@ -73,29 +66,27 @@ docker run --rm \
 
         stage('Docker Build & Push') {
             steps {
+                checkout scm
                 withDockerRegistry(credentialsId: 'docker-hub-creds', url: 'https://index.docker.io/v1/') {
                     script {
                         def apps = ['cbs-simulator', 'middleware', 'dashboard']
-                        // use BUILD_NUMBER as an immutable tag if available, otherwise fallback to 'latest'
                         def imageTag = env.BUILD_NUMBER ? "${env.BUILD_NUMBER}" : 'latest'
 
                         apps.eachWithIndex { app, idx ->
-                            echo "Building ${app}..."
+                            if (!app) {
+                                error("ERROR: app variable is empty — aborting to avoid invalid image tag")
+                            }
+
+                            echo "Building ${app} with tag ${imageTag}..."
 
                             if (app == 'dashboard') {
-                                // dashboard with build-arg (use triple-double quotes so Groovy vars interpolate)
                                 sh """
-                                    docker build --no-cache \
-                                      -t ${env.DOCKER_REGISTRY}/${app}:${imageTag} \
-                                      --build-arg REACT_APP_API_URL=http://middleware:3000 \
-                                      ./${app}
+                                    docker build --no-cache -t ${env.DOCKER_REGISTRY}/${app}:${imageTag} --build-arg REACT_APP_API_URL=http://middleware:3000 ./${app}
                                 """
                             } else {
                                 sh "docker build --no-cache -t ${env.DOCKER_REGISTRY}/${app}:${imageTag} ./${app}"
                             }
 
-                            echo "Testing ${app} image locally..."
-                            // map a different host port per app to avoid collisions
                             def hostPort = 8080 + idx
                             sh "docker run --rm -d --name test-${app} -p ${hostPort}:80 ${env.DOCKER_REGISTRY}/${app}:${imageTag} || true"
                             sh 'sleep 5'
@@ -103,7 +94,6 @@ docker run --rm \
                             sh "docker stop test-${app} || true"
                             sh "docker rm test-${app} || true"
 
-                            echo "Pushing ${app}..."
                             sh "docker push ${env.DOCKER_REGISTRY}/${app}:${imageTag}"
                             echo "✓ ${app} built and pushed successfully as ${env.DOCKER_REGISTRY}/${app}:${imageTag}"
                         }
@@ -129,66 +119,36 @@ docker run --rm \
             steps {
                 script {
                     try {
-                        echo '=== Creating/Verifying Namespace ==='
                         sh "kubectl create namespace ${env.K8S_NAMESPACE} --dry-run=client -o yaml | kubectl apply -f -"
-
-                        echo '=== Deleting Existing Deployments ==='
                         sh "kubectl delete deployment cbs-simulator middleware dashboard -n ${env.K8S_NAMESPACE} --ignore-not-found=true"
-
-                        echo '=== Waiting for Pod Termination ==='
                         sh 'sleep 15'
-
-                        echo '=== Applying New Deployments ==='
                         sh 'kubectl apply -f kubernetes/deploy-all.yaml'
 
-                        echo '=== Waiting for Deployments to be Ready ==='
                         def apps = ['cbs-simulator', 'middleware', 'dashboard']
                         apps.each { app ->
-                            echo "Checking rollout status for: ${app}"
                             timeout(time: 6, unit: 'MINUTES') {
                                 sh "kubectl rollout status deployment/${app} -n ${env.K8S_NAMESPACE} --timeout=300s"
                             }
-                            echo "✓ ${app} deployment successful"
                         }
 
-                        echo '=== Deployment Summary ==='
-                        sh '''
-echo "Services:"
-kubectl get services -n ${K8S_NAMESPACE}
-
-echo "Pods:"
-kubectl get pods -n ${K8S_NAMESPACE} -o wide
-
-echo "Images in use:"
-kubectl get deployments -n ${K8S_NAMESPACE} -o custom-columns=NAME:.metadata.name,IMAGE:.spec.template.spec.containers[0].image --no-headers
-'''
-
+                        sh """
+kubectl get services -n ${env.K8S_NAMESPACE}
+kubectl get pods -n ${env.K8S_NAMESPACE} -o wide
+kubectl get deployments -n ${env.K8S_NAMESPACE} -o custom-columns=NAME:.metadata.name,IMAGE:.spec.template.spec.containers[0].image --no-headers
+"""
                     } catch (Exception e) {
-                        echo '=== DEPLOYMENT FAILED - Gathering Debug INFORMATION ==='
-                        sh '''
-echo '=== All Resources in Namespace ==='
-kubectl get all -n ${K8S_NAMESPACE} || true
-
-echo '=== Deployment Details ==='
-kubectl describe deployments -n ${K8S_NAMESPACE} || true
-
-echo '=== Pod Details ==='
-kubectl describe pods -n ${K8S_NAMESPACE} || true
-
-echo '=== Recent Events ==='
-kubectl get events -n ${K8S_NAMESPACE} --sort-by='.lastTimestamp' --field-selector type!=Normal || true
-
-echo '=== Pod Logs ==='
-for pod in $(kubectl get pods -n ${K8S_NAMESPACE} -o jsonpath='{.items[*].metadata.name}'); do
-  echo "--- Logs for $pod ---"
-  kubectl logs $pod -n ${K8S_NAMESPACE} --tail=100 --all-containers=true || true
-  echo ""
+                        sh """
+kubectl get all -n ${env.K8S_NAMESPACE} || true
+kubectl describe deployments -n ${env.K8S_NAMESPACE} || true
+kubectl describe pods -n ${env.K8S_NAMESPACE} || true
+kubectl get events -n ${env.K8S_NAMESPACE} --sort-by='.lastTimestamp' --field-selector type!=Normal || true
+for pod in $(kubectl get pods -n ${env.K8S_NAMESPACE} -o jsonpath='{.items[*].metadata.name}'); do
+  echo \"--- Logs for $pod ---\"
+  kubectl logs $pod -n ${env.K8S_NAMESPACE} --tail=100 --all-containers=true || true
 done
-
-echo '=== Node Status ==='
 kubectl top nodes || true
 kubectl describe nodes || true
-'''
+"""
                         error("Deployment failed: ${e.message}")
                     }
                 }
@@ -198,7 +158,6 @@ kubectl describe nodes || true
         stage('Verify Deployment Health') {
             steps {
                 script {
-                    echo '=== Verifying Application Health ==='
                     sh '''
 sleep 15
 RUNNING_PODS=$(kubectl get pods -n ${K8S_NAMESPACE} --field-selector=status.phase=Running --no-headers | wc -l)
@@ -209,7 +168,6 @@ if [ "$RUNNING_PODS" -eq 0 ]; then
   exit 1
 fi
 
-echo "Testing service endpoints..."
 curl -f -s -o /dev/null -w "Dashboard (port 30004): HTTP %{http_code}\n" http://${MASTER_IP}:30004 || echo "Dashboard: Not accessible"
 curl -f -s -o /dev/null -w "Middleware (port 30003): HTTP %{http_code}\n" http://${MASTER_IP}:30003 || echo "Middleware: Not accessible"
 curl -f -s -o /dev/null -w "Middleware Health: HTTP %{http_code}\n" http://${MASTER_IP}:30003/health || echo "Middleware /health: Not accessible"
@@ -224,33 +182,20 @@ curl -f -s -o /dev/null -w "Simulator (port 30005): HTTP %{http_code}\n" http://
                 script {
                     try {
                         withCredentials([string(credentialsId: 'owasp-zap-api-key', variable: 'ZAP_API_KEY')]) {
-                            echo '=== Starting OWASP ZAP Security Scan ==='
                             sh '''
 set -eux
-# Force the correct ZAP host/port from pipeline env (override any other source)
 export ZAP_HOST=${env.ZAP_HOST}
 export ZAP_PORT=${env.ZAP_PORT}
-
-echo "ZAP_HOST=$ZAP_HOST"
-echo "ZAP_PORT=$ZAP_PORT"
-echo "WORKER1_IP=${env.WORKER1_IP}"
-
 sleep 5
-echo "Initiating spider scan..."
 curl -v "http://$ZAP_HOST:$ZAP_PORT/JSON/spider/action/scan/?apikey=${ZAP_API_KEY}&url=http://${env.WORKER1_IP}:30004" || true
 sleep 30
-
-echo "Initiating active scan..."
 curl -v "http://$ZAP_HOST:$ZAP_PORT/JSON/ascan/action/scan/?apikey=${ZAP_API_KEY}&url=http://${env.WORKER1_IP}:30004" || true
 sleep 60
-
-echo "Generating report..."
 curl -v "http://$ZAP_HOST:$ZAP_PORT/OTHER/core/other/htmlreport/?apikey=${ZAP_API_KEY}" -o owasp-zap-report.html || true
 '''
                         }
                     } catch (Exception e) {
                         echo "OWASP ZAP scan failed: ${e.message}"
-                        echo 'Continuing pipeline execution...'
                     }
                 }
             }
@@ -259,34 +204,22 @@ curl -v "http://$ZAP_HOST:$ZAP_PORT/OTHER/core/other/htmlreport/?apikey=${ZAP_AP
 
     post {
         always {
-            echo '=== Pipeline Execution Complete ==='
-            script {
-                archiveArtifacts artifacts: '*-npm-audit.json, *-trivy-report.txt, owasp-zap-report.html', allowEmptyArchive: true, fingerprint: true
-                sh '''
-echo "Final Deployment Status:"
-kubectl get all -n ${K8S_NAMESPACE} || true
-'''
-            }
+            archiveArtifacts artifacts: '*-npm-audit.json, *-trivy-report.txt, owasp-zap-report.html', allowEmptyArchive: true, fingerprint: true
+            sh 'kubectl get all -n ${K8S_NAMESPACE} || true'
         }
         success {
             echo '✓ Pipeline completed successfully!'
-            echo '=== Access URLs ==='
-            echo "Dashboard: http://${MASTER_IP}:30004"
-            echo "Middleware: http://${MASTER_IP}:30003"
-            echo "Simulator: http://${MASTER_IP}:30005"
+            echo \"Dashboard: http://${MASTER_IP}:30004\"
+            echo \"Middleware: http://${MASTER_IP}:30003\"
+            echo \"Simulator: http://${MASTER_IP}:30005\"
         }
         failure {
-            echo '✗ Pipeline failed!'
             script {
                 sh '''
-echo "=== Final Debug Information ==="
 kubectl get pods -n ${K8S_NAMESPACE} -o wide || true
 kubectl get events -n ${K8S_NAMESPACE} --sort-by='.lastTimestamp' | tail -20 || true
 '''
             }
-        }
-        unstable {
-            echo '⚠ Pipeline completed with warnings'
         }
     }
 }
