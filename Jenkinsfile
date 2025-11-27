@@ -80,21 +80,14 @@ docker run --rm \
                         def imageTag = env.BUILD_NUMBER ? "${env.BUILD_NUMBER}" : 'latest'
 
                         apps.eachWithIndex { app, idx ->
-                            // Guard: ensure app is set
-                            echo "DEBUG: app variable (Groovy) = '${app}'"
-                            echo "DEBUG: env.DOCKER_REGISTRY = '${env.DOCKER_REGISTRY}'"
-                            if (!app) {
-                                error("ERROR: app variable is empty — aborting build to avoid invalid image tag")
-                            }
-
-                            echo "Building ${app} with tag ${imageTag}..."
+                            echo "Building ${app}..."
 
                             if (app == 'dashboard') {
                                 // dashboard with build-arg (use triple-double quotes so Groovy vars interpolate)
                                 sh """
-                                    docker build --no-cache \\
-                                      -t ${env.DOCKER_REGISTRY}/${app}:${imageTag} \\
-                                      --build-arg REACT_APP_API_URL=http://middleware:3000 \\
+                                    docker build --no-cache \
+                                      -t ${env.DOCKER_REGISTRY}/${app}:${imageTag} \
+                                      --build-arg REACT_APP_API_URL=http://middleware:3000 \
                                       ./${app}
                                 """
                             } else {
@@ -167,8 +160,9 @@ echo "Pods:"
 kubectl get pods -n ${K8S_NAMESPACE} -o wide
 
 echo "Images in use:"
-kubectl get deployments -n ${K8S_NAMESPACE} -o jsonpath='{range .items[*]}{.metadata.name}{": "}{.spec.template.spec.containers[0].image}{"\n"}{end}'
+kubectl get deployments -n ${K8S_NAMESPACE} -o custom-columns=NAME:.metadata.name,IMAGE:.spec.template.spec.containers[0].image --no-headers
 '''
+
                     } catch (Exception e) {
                         echo '=== DEPLOYMENT FAILED - Gathering Debug INFORMATION ==='
                         sh '''
