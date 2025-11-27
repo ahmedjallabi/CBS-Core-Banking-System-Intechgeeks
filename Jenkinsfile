@@ -73,32 +73,35 @@ docker run --rm \
 
         stage('Docker Build & Push') {
             steps {
-                withDockerRegistry(credentialsId: 'docker-hub-creds',
-                                   url: 'https://index.docker.io/v1/') {
+                withDockerRegistry(credentialsId: 'docker-hub-creds', url: 'https://index.docker.io/v1/') {
                     script {
                         def apps = ['cbs-simulator', 'middleware', 'dashboard']
 
                         apps.each { app ->
-                            echo "=== Building Image for ${app} ==="
+                            echo "=== Building image for: ${app} ==="
 
-                            // Debug
-                            sh "echo DEBUG: building ${env.DOCKER_REGISTRY}/${app}:latest"
+                            // Vérifier que le dossier existe
+                            sh "if [ ! -d './${app}' ]; then echo 'ERROR: directory ./${app} not found'; ls -la || true; exit 1; fi"
 
-                            sh """
-                                docker build --no-cache \
-                                  -t ${env.DOCKER_REGISTRY}/${app}:latest \
-                                  ./${app}
-                            """
+                            // Construire le tag et la commande en Groovy (interpolation ici)
+                            def imageTag = "${env.DOCKER_REGISTRY}/${app}:latest"
+                            def buildCmd = "docker build --no-cache -t ${imageTag} ./${app}"
 
-                            echo "Testing ${app} image locally..."
-                            sh "docker run --rm -d --name test-${app} -p 8080:80 ${env.DOCKER_REGISTRY}/${app}:latest || true"
-                            sh "sleep 5"
-                            sh "curl -f http://localhost:8080 || echo 'Health check failed'"
+                            // Afficher la commande (debug) puis l'exécuter
+                            echo "DEBUG: will run: ${buildCmd}"
+                            sh buildCmd
+
+                            // Test run (optionnel) — utile pour détecter les erreurs d'image
+                            sh "docker run --rm -d --name test-${app} -p 8080:80 ${imageTag} || true"
+                            sh 'sleep 5'
+                            sh "curl -f http://localhost:8080 || echo 'Health check failed (may be normal for non-web apps)'"
                             sh "docker stop test-${app} || true"
                             sh "docker rm test-${app} || true"
 
-                            echo "Pushing ${app}..."
-                            sh "docker push ${env.DOCKER_REGISTRY}/${app}:latest"
+                            // Push
+                            echo "Pushing ${imageTag}..."
+                            sh "docker push ${imageTag}"
+                            echo "✓ ${imageTag} pushed"
                         }
                     }
                 }
@@ -161,21 +164,23 @@ docker run --rm \
                 script {
                     withCredentials([string(credentialsId: 'owasp-zap-api-key', variable: 'ZAP_API_KEY')]) {
                         sh """
-                            echo '=== OWASP ZAP Scan START ==='
-                            curl -v "http://${env.ZAP_HOST}:${env.ZAP_PORT}/JSON/spider/action/scan/?apikey=$ZAP_API_KEY&url=http://${env.WORKER1_IP}:30004" || true
-                            sleep 20
+echo '=== OWASP ZAP Scan START ==='
+# Note: \$ZAP_API_KEY is escaped so Groovy won't interpolate it — the shell will.
+curl -v "http://${env.ZAP_HOST}:${env.ZAP_PORT}/JSON/spider/action/scan/?apikey=\\\$ZAP_API_KEY&url=http://${env.WORKER1_IP}:30004" || true
+sleep 20
 
-                            curl -v "http://${env.ZAP_HOST}:${env.ZAP_PORT}/JSON/ascan/action/scan/?apikey=$ZAP_API_KEY&url=http://${env.WORKER1_IP}:30004" || true
-                            sleep 40
+curl -v "http://${env.ZAP_HOST}:${env.ZAP_PORT}/JSON/ascan/action/scan/?apikey=\\\$ZAP_API_KEY&url=http://${env.WORKER1_IP}:30004" || true
+sleep 40
 
-                            curl -v "http://${env.ZAP_HOST}:${env.ZAP_PORT}/OTHER/core/other/htmlreport/?apikey=$ZAP_API_KEY" -o owasp-zap-report.html || true
-                        """
+curl -v "http://${env.ZAP_HOST}:${env.ZAP_PORT}/OTHER/core/other/htmlreport/?apikey=\\\$ZAP_API_KEY" -o owasp-zap-report.html || true
+echo '=== OWASP ZAP Scan END ==='
+"""
                     }
                 }
             }
         }
 
-    }
+    } // end stages
 
     post {
         always {
@@ -185,6 +190,16 @@ docker run --rm \
             echo "Dashboard: http://${env.MASTER_IP}:30004"
             echo "Middleware: http://${env.MASTER_IP}:30003"
             echo "Simulator: http://${env.MASTER_IP}:30005"
+        }
+        failure {
+            echo '✗ Pipeline failed!'
+            script {
+                sh '''
+echo "=== Final Debug Information ==="
+kubectl get pods -n ${env.K8S_NAMESPACE} -o wide || true
+kubectl get events -n ${env.K8S_NAMESPACE} --sort-by='.lastTimestamp' | tail -20 || true
+'''
+            }
         }
     }
 }
