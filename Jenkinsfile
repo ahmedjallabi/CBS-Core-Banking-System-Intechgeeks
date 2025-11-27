@@ -76,34 +76,36 @@ docker run --rm \
                 withDockerRegistry(credentialsId: 'docker-hub-creds', url: 'https://index.docker.io/v1/') {
                     script {
                         def apps = ['cbs-simulator', 'middleware', 'dashboard']
-                        apps.each { app ->
+                        // use BUILD_NUMBER as an immutable tag if available, otherwise fallback to 'latest'
+                        def imageTag = env.BUILD_NUMBER ? "${env.BUILD_NUMBER}" : 'latest'
+
+                        apps.eachWithIndex { app, idx ->
                             echo "Building ${app}..."
+
                             if (app == 'dashboard') {
-                                // Use internal cluster service for API to avoid CORS issues
-                                sh '''
-docker build --no-cache \
-  -t ${DOCKER_REGISTRY}/${app}:latest \
-  --build-arg REACT_APP_API_URL=http://middleware:3000 \
-  ./${app}
-'''
+                                // dashboard with build-arg (use triple-double quotes so Groovy vars interpolate)
+                                sh """
+                                    docker build --no-cache \
+                                      -t ${env.DOCKER_REGISTRY}/${app}:${imageTag} \
+                                      --build-arg REACT_APP_API_URL=http://middleware:3000 \
+                                      ./${app}
+                                """
                             } else {
-                                sh '''
-docker build --no-cache \
-  -t ${DOCKER_REGISTRY}/${app}:latest \
-  ./${app}
-'''
+                                sh "docker build --no-cache -t ${env.DOCKER_REGISTRY}/${app}:${imageTag} ./${app}"
                             }
 
                             echo "Testing ${app} image locally..."
-                            sh "docker run --rm -d --name test-${app} -p 8080:80 ${DOCKER_REGISTRY}/${app}:latest || true"
+                            // map a different host port per app to avoid collisions
+                            def hostPort = 8080 + idx
+                            sh "docker run --rm -d --name test-${app} -p ${hostPort}:80 ${env.DOCKER_REGISTRY}/${app}:${imageTag} || true"
                             sh 'sleep 5'
-                            sh "curl -f http://localhost:8080 || echo 'Health check failed'"
+                            sh "curl -f http://localhost:${hostPort} || echo 'Health check failed for ${app} on port ${hostPort}'"
                             sh "docker stop test-${app} || true"
                             sh "docker rm test-${app} || true"
 
                             echo "Pushing ${app}..."
-                            sh "docker push ${DOCKER_REGISTRY}/${app}:latest"
-                            echo "✓ ${app} built and pushed successfully"
+                            sh "docker push ${env.DOCKER_REGISTRY}/${app}:${imageTag}"
+                            echo "✓ ${app} built and pushed successfully as ${env.DOCKER_REGISTRY}/${app}:${imageTag}"
                         }
                     }
                 }
@@ -114,9 +116,10 @@ docker build --no-cache \
             steps {
                 script {
                     def apps = ['cbs-simulator', 'middleware', 'dashboard']
+                    def imageTag = env.BUILD_NUMBER ? "${env.BUILD_NUMBER}" : 'latest'
                     apps.each { app ->
                         echo "🔍 Scanning ${app} for vulnerabilities..."
-                        sh "trivy image --exit-code 0 --severity HIGH,CRITICAL ${DOCKER_REGISTRY}/${app}:latest > ${app}-trivy-report.txt || true"
+                        sh "trivy image --exit-code 0 --severity HIGH,CRITICAL ${env.DOCKER_REGISTRY}/${app}:${imageTag} > ${app}-trivy-report.txt || true"
                     }
                 }
             }
@@ -127,10 +130,10 @@ docker build --no-cache \
                 script {
                     try {
                         echo '=== Creating/Verifying Namespace ==='
-                        sh "kubectl create namespace ${K8S_NAMESPACE} --dry-run=client -o yaml | kubectl apply -f -"
+                        sh "kubectl create namespace ${env.K8S_NAMESPACE} --dry-run=client -o yaml | kubectl apply -f -"
 
                         echo '=== Deleting Existing Deployments ==='
-                        sh "kubectl delete deployment cbs-simulator middleware dashboard -n ${K8S_NAMESPACE} --ignore-not-found=true"
+                        sh "kubectl delete deployment cbs-simulator middleware dashboard -n ${env.K8S_NAMESPACE} --ignore-not-found=true"
 
                         echo '=== Waiting for Pod Termination ==='
                         sh 'sleep 15'
@@ -143,7 +146,7 @@ docker build --no-cache \
                         apps.each { app ->
                             echo "Checking rollout status for: ${app}"
                             timeout(time: 6, unit: 'MINUTES') {
-                                sh "kubectl rollout status deployment/${app} -n ${K8S_NAMESPACE} --timeout=300s"
+                                sh "kubectl rollout status deployment/${app} -n ${env.K8S_NAMESPACE} --timeout=300s"
                             }
                             echo "✓ ${app} deployment successful"
                         }
