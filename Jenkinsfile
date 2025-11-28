@@ -65,6 +65,9 @@ docker run --rm \
     }
     // testing cote ersln security 
 //testing webhook
+
+
+// teste au nivaeu de la securite et ngrok 
     stage('Docker Build & Push') {
       steps {
         // ensure we have the latest Jenkinsfile/workspace when restarting from stage
