@@ -193,7 +193,7 @@ docker run --rm \
         }
 
 
-    stage('Verify Deployment Health pour le test de pres commit') {
+    stage('Verify Deployment Health pour le test') {
       steps {
         script {
           sh """#!/bin/bash
