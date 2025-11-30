@@ -50,23 +50,82 @@ docker run --rm \
     }
 
     stage('Image Security Scan (Trivy)') {
-      steps {
-        script {
-          def apps = ['cbs-simulator', 'middleware', 'dashboard']
-          def imageTag = env.BUILD_NUMBER ? "${env.BUILD_NUMBER}" : 'latest'
-          apps.each { app ->
-            echo "🔍 Trivy: scanning ${app}..."
-            sh """
-if docker image inspect ${env.DOCKER_REGISTRY}/${app}:${imageTag} >/dev/null 2>&1; then
-  trivy image --exit-code 0 --severity HIGH,CRITICAL ${env.DOCKER_REGISTRY}/${app}:${imageTag} > ${app}-trivy-report.txt || true
+  steps {
+    script {
+      // Control: set to "true" to fail the build on CRITICAL vulns
+      def FAIL_ON_CRITICAL = env.FAIL_ON_CRITICAL ?: 'false'
+      def apps = ['cbs-simulator', 'middleware', 'dashboard']
+      def imageTag = env.BUILD_NUMBER ? "${env.BUILD_NUMBER}" : 'latest'
+
+      // ensure UTF-8 in subprocesses (helps avoid mojibake on some systems)
+      sh 'export LC_ALL=C.UTF-8 || true'
+
+      apps.each { app ->
+        echo "🔍 Trivy: scanning ${app}..."
+        def jsonFile = "${app}-trivy.json"
+        def txtFile  = "${app}-trivy.txt"
+
+        // Choose image or filesystem scan
+        sh """
+set -e
+IMAGE="${env.DOCKER_REGISTRY}/${app}:${imageTag}"
+if docker image inspect "$IMAGE" >/dev/null 2>&1; then
+  echo "-> Scanning image: $IMAGE"
+  # JSON output (stable, machine-readable)
+  trivy image --format json --output ${jsonFile} --severity HIGH,CRITICAL "$IMAGE" || true
+  # Human-readable table output (saved to file; tee to console)
+  trivy image --format table --output ${txtFile} --severity HIGH,CRITICAL "$IMAGE" || true
 else
-  trivy fs --exit-code 0 --severity HIGH,CRITICAL ./${app} > ${app}-trivy-report.txt || true
+  echo "-> Image not found locally, scanning filesystem ./${app}"
+  trivy fs --format json --output ${jsonFile} --severity HIGH,CRITICAL ./${app} || true
+  trivy fs --format table --output ${txtFile} --severity HIGH,CRITICAL ./${app} || true
 fi
 """
-          }
+
+        // Try to compute number of CRITICAL vulns from JSON using Python (best), fallback to grep
+        def criticalCount = 0
+        try {
+          criticalCount = sh(returnStdout: true, script: """#!/bin/bash
+if command -v python3 >/dev/null 2>&1; then
+  python3 - <<'PY'
+import json,sys
+try:
+  j = json.load(open('${jsonFile}'))
+except Exception:
+  print(0)
+  sys.exit(0)
+c = 0
+for r in j.get('Results', []):
+  for v in (r.get('Vulnerabilities') or []):
+    if v.get('Severity','').upper() == 'CRITICAL':
+      c += 1
+print(c)
+PY
+else
+  # fallback: rough grep-based count
+  grep -o \"CRITICAL\" ${jsonFile} 2>/dev/null | wc -l || true
+fi
+""").trim()
+          criticalCount = (criticalCount == '') ? 0 : (criticalCount as Integer)
+        } catch (err) {
+          echo "Warning: impossible de calculer exactement CRITICAL count (${err}); fallback to 0"
+          criticalCount = 0
         }
-      }
-    }
+
+        echo "-> ${app} : CRITICAL vuln count = ${criticalCount}"
+
+        // Archive artifacts for later review
+        archiveArtifacts artifacts: "${jsonFile}, ${txtFile}", allowEmptyArchive: true, fingerprint: true
+
+        // Optionally fail the build if criticals found and FAIL_ON_CRITICAL=true
+        if (FAIL_ON_CRITICAL.toLowerCase() == 'true' && criticalCount > 0) {
+          error("Build failed: ${criticalCount} CRITICAL vulnerabilities found in ${app}")
+        }
+      } // apps.each
+    } // script
+  } // steps
+} // stage
+
 
     stage('Dependency Audit (npm audit)') {
       steps {
