@@ -91,89 +91,44 @@ docker build --no-cache -t ${env.DOCKER_REGISTRY}/${app}:${imageTag} \
       }
     }
 
-    // ===== Trivy: scan des images construites (après Docker Build & Push) =====
-    stage('Image Security Scan (Trivy)') {
+    // ===== Trivy HTML stage (remplacé comme demandé) =====
+    stage('Image Security Scan (Trivy - HTML)') {
       steps {
         script {
-          // Mettre FAIL_ON_CRITICAL=true dans les variables de job si tu veux que la build échoue
-          def FAIL_ON_CRITICAL = (env.FAIL_ON_CRITICAL ?: 'false').toLowerCase()
           def apps = ['cbs-simulator', 'middleware', 'dashboard']
-          def imageTag = env.BUILD_NUMBER ? "${env.BUILD_NUMBER}" : 'latest'
-
-          // essayer d'assurer UTF-8 pour subprocesses
-          sh 'export LC_ALL=C.UTF-8 || true'
-
+          def tag = env.BUILD_NUMBER ?: 'latest'
           apps.each { app ->
-            echo "🔍 Trivy: scanning ${app}..."
-            def jsonFile = "${app}-trivy.json"
-            def txtFile  = "${app}-trivy.txt"
-
-            // Scan image si présente localement, sinon scan filesystem
+            echo "📄 Generating HTML vulnerability report for ${app}..."
+            // Mount workspace into /reports so generated HTML lands in workspace
             sh """
-set -e
-IMAGE="${env.DOCKER_REGISTRY}/${app}:${imageTag}"
-if docker image inspect "$IMAGE" >/dev/null 2>&1; then
-  echo "-> Scanning image: $IMAGE"
-  trivy image --no-progress --format json --output ${jsonFile} --severity HIGH,CRITICAL "$IMAGE" || true
-  trivy image --no-progress --format table --output ${txtFile} --severity HIGH,CRITICAL "$IMAGE" || true
-else
-  echo "-> Image not found locally, scanning filesystem ./${app}"
-  trivy fs --no-progress --format json --output ${jsonFile} --severity HIGH,CRITICAL ./${app} || true
-  trivy fs --no-progress --format table --output ${txtFile} --severity HIGH,CRITICAL ./${app} || true
-fi
-"""
-
-            // Calculer le nombre de vulnérabilités CRITICAL (préférence python3, fallback grep)
-            def criticalCount = 0
-            try {
-              criticalCount = sh(returnStdout: true, script: """#!/bin/bash
-if command -v python3 >/dev/null 2>&1; then
-  python3 - <<'PY'
-import json,sys
-try:
-  j = json.load(open('${jsonFile}'))
-except Exception:
-  print(0)
-  sys.exit(0)
-c = 0
-for r in j.get('Results', []):
-  for v in (r.get('Vulnerabilities') or []):
-    if v.get('Severity','').upper() == 'CRITICAL':
-      c += 1
-print(c)
-PY
-else
-  grep -o "CRITICAL" ${jsonFile} 2>/dev/null | wc -l || true
-fi
-""").trim()
-              criticalCount = (criticalCount == '') ? 0 : (criticalCount as Integer)
-            } catch (err) {
-              echo "Warning: impossible de calculer exactement CRITICAL count (${err}); fallback to 0"
-              criticalCount = 0
-            }
-
-            echo "-> ${app} : CRITICAL vuln count = ${criticalCount}"
-
-            // Générer un HTML simple à partir du JSON si jq est présent (pratique pour visualiser)
+              docker run --rm \
+                -v /var/run/docker.sock:/var/run/docker.sock \
+                -v \$(pwd):/reports \
+                aquasec/trivy:latest image \
+                --format template \
+                --template "@/contrib/html.tpl" \
+                -o /reports/${app}-trivy-report.html \
+                ${DOCKER_REGISTRY}/${app}:${tag} || true
+            """
+            // Fallback: also produce a plain text table if HTML failed (keeps pipeline robust)
             sh """
-if command -v jq >/dev/null 2>&1 && [ -f ${jsonFile} ]; then
-  echo '<html><body><h2>Trivy JSON report for ${app}</h2><pre>' > ${app}-trivy.html
-  jq . ${jsonFile} >> ${app}-trivy.html || true
-  echo '</pre></body></html>' >> ${app}-trivy.html || true
-fi
-"""
+              if [ ! -f ${app}-trivy-report.html ]; then
+                echo "⚠ HTML generation failed for ${app}. Generating TXT fallback..."
+                docker run --rm \
+                  -v /var/run/docker.sock:/var/run/docker.sock \
+                  -v \$(pwd):/reports \
+                  aquasec/trivy:latest image \
+                  --format table --no-progress \
+                  ${DOCKER_REGISTRY}/${app}:${tag} > ${app}-trivy-report.txt || true
+              fi
+            """
+          }
 
-            // Archiver les rapports
-            archiveArtifacts artifacts: "${jsonFile}, ${txtFile}, ${app}-trivy.html", allowEmptyArchive: true, fingerprint: true
-
-            // Optionnel : échouer la build si CRITICAL>0 et variable FAIL_ON_CRITICAL=true
-            if (FAIL_ON_CRITICAL == 'true' && criticalCount > 0) {
-              error("Build failed: ${criticalCount} CRITICAL vulnerabilities found in ${app}")
-            }
-          } // apps.each
-        } // script
-      } // steps
-    } // stage (Trivy)
+          // Archive the reports so you can download them from Jenkins UI
+          archiveArtifacts artifacts: '*-trivy-report.html, *-trivy-report.txt', allowEmptyArchive: true, fingerprint: true
+        }
+      }
+    }
 
     stage('Dynamic Security Testing (OWASP ZAP)') {
       steps {
@@ -223,8 +178,7 @@ curl -v "http://$ZAP_HOST:$ZAP_PORT/OTHER/core/other/htmlreport/?apikey=${ZAP_AP
 
   post {
     always {
-      // Archive glob patterns mis à jour pour inclure les rapports Trivy JSON/TXT/HTML
-      archiveArtifacts artifacts: '*-npm-audit.json, *-trivy.txt, *-trivy.json, *-trivy.html, owasp-zap-report.html', allowEmptyArchive: true, fingerprint: true
+      archiveArtifacts artifacts: '*-npm-audit.json, *-trivy-report.txt, *-trivy-report.html, owasp-zap-report.html', allowEmptyArchive: true, fingerprint: true
       sh "kubectl get all -n ${env.K8S_NAMESPACE} || true"
     }
     success {
