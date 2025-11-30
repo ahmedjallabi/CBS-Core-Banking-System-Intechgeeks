@@ -162,7 +162,7 @@ curl -v "http://$ZAP_HOST:$ZAP_PORT/OTHER/core/other/htmlreport/?apikey=${ZAP_AP
     /* 
     ===== Deployment stage commenté (demandé par l'utilisateur) =====
     Le bloc suivant est entièrement commenté pour désactiver le déploiement vers l'environnement de test.
-    Si tu veux le réactiver, supprime simplement les délimiteurs /* ... *\/ et décommente.
+    Si tu veux le réactiver, supprime simplement les délimiteurs /* ... */ et décommente.
     */
     /*
     stage('Deployment to Test Env') {
@@ -235,29 +235,7 @@ curl -v "http://$ZAP_HOST:$ZAP_PORT/OTHER/core/other/htmlreport/?apikey=${ZAP_AP
         }
     */
 
-    /*stage('Verify Deployment Health pour le test') {
-      steps {
-        script {
-          sh """#!/bin/bash
-sleep 15
-RUNNING_PODS=$(kubectl get pods -n ${env.K8S_NAMESPACE} --field-selector=status.phase=Running --no-headers | wc -l)
-TOTAL_PODS=$(kubectl get pods -n ${env.K8S_NAMESPACE} --no-headers | wc -l)
-echo "Running Pods: $RUNNING_PODS / $TOTAL_PODS"
-if [ "$RUNNING_PODS" -eq 0 ]; then
-  echo "ERROR: No pods are running!"
-  exit 1
-fi
-
-curl -f -s -o /dev/null -w "Dashboard (port 30004): HTTP %{http_code}\n" http://${MASTER_IP}:30004 || echo "Dashboard: Not accessible"
-curl -f -s -o /dev/null -w "Middleware (port 30003): HTTP %{http_code}\n" http://${MASTER_IP}:30003 || echo "Middleware: Not accessible"
-curl -f -s -o /dev/null -w "Middleware Health: HTTP %{http_code}\n" http://${MASTER_IP}:30003/health || echo "Middleware /health: Not accessible"
-curl -f -s -o /dev/null -w "Simulator (port 30005): HTTP %{http_code}\n" http://${MASTER_IP}:30005 || echo "Simulator: Not accessible"
-"""
-        }
-      }
-    }
-
-  }*/ // stages
+  } // stages
 
   post {
     always {
