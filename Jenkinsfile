@@ -31,19 +31,20 @@
       steps {
         script {
           withCredentials([string(credentialsId: 'sonarqube', variable: 'SONAR_TOKEN')]) {
-            sh '''#!/bin/bash
+            // Utilise env.WORKSPACE pour monter le workspace dans le conteneur
+            sh """#!/bin/bash
 echo "🔗 SonarQube URL: http://192.168.90.136:9000"
 
 docker run --rm \
-  -v $(pwd):/usr/src \
+  -v "${env.WORKSPACE}":/usr/src \
   -e SONAR_HOST_URL=http://192.168.90.136:9000 \
-  -e SONAR_LOGIN=$SONAR_TOKEN \
+  -e SONAR_LOGIN="${env.SONAR_TOKEN}" \
   sonarsource/sonar-scanner-cli \
   -Dsonar.projectKey=CBS-stimul \
   -Dsonar.sources=/usr/src \
-  -Dsonar.login=$SONAR_TOKEN \
+  -Dsonar.login="${env.SONAR_TOKEN}" \
   -Dsonar.host.url=http://192.168.90.136:9000
-'''
+"""
           }
         }
       }
@@ -56,7 +57,7 @@ docker run --rm \
           apps.each { app ->
             dir(app) {
               sh 'npm install --no-audit --no-fund'
-              sh "npm audit --json > ../${app}-npm-audit.json || true"
+              sh "npm audit --json > \"${env.WORKSPACE}/${app}-npm-audit.json\" || true"
               sh "npm audit --audit-level=high || true"
             }
           }
@@ -76,12 +77,14 @@ docker run --rm \
               echo "Building ${app} with tag ${imageTag}..."
 
               if (app == 'dashboard') {
-                sh """
+                sh """#!/bin/bash
 docker build --no-cache -t ${env.DOCKER_REGISTRY}/${app}:${imageTag} \
   --build-arg REACT_APP_API_URL=http://middleware:3000 ./${app}
 """
               } else {
-                sh "docker build --no-cache -t ${env.DOCKER_REGISTRY}/${app}:${imageTag} ./${app}"
+                sh """#!/bin/bash
+docker build --no-cache -t ${env.DOCKER_REGISTRY}/${app}:${imageTag} ./${app}
+"""
               }
 
               sh "docker push ${env.DOCKER_REGISTRY}/${app}:${imageTag}"
@@ -91,49 +94,61 @@ docker build --no-cache -t ${env.DOCKER_REGISTRY}/${app}:${imageTag} \
       }
     }
 
-    // ===== Trivy HTML stage (remplacé comme demandé) =====
-   stage('Image Security Scan (Trivy - HTML)') {
-            steps {
-                script {
-                    def apps = ['cbs-simulator', 'middleware', 'dashboard']
-                    apps.each { app ->
-                        echo "📄 Generating HTML vulnerability report for ${app}..."
-                        // Mount workspace into /reports so generated HTML lands in workspace
-                        sh """
-                            docker run --rm \
-                                -v /var/run/docker.sock:/var/run/docker.sock \
-                                -v \$(pwd):/reports \
-                                aquasec/trivy:latest image \
-                                --format template \
-                                --template "@/contrib/html.tpl" \
-                                -o /reports/${app}-trivy-report.html \
-                                ${DOCKER_REGISTRY}/${app}:latest || true
-                        """
-                        // Fallback: also produce a plain text table if HTML failed (keeps pipeline robust)
-                        sh """
-                          if [ ! -f ${app}-trivy-report.html ]; then
-                              docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v \$(pwd):/reports aquasec/trivy:latest image --format table --no-progress ${DOCKER_REGISTRY}/${app}:latest > ${app}-trivy-report.txt || true
-                          fi
-                        """
-                    }
-                }
-            }
+    // ===== Trivy HTML stage corrigé : on définit explicitement `image` =====
+    stage('Image Security Scan (Trivy - HTML)') {
+      steps {
+        script {
+          def apps = ['cbs-simulator', 'middleware', 'dashboard']
+          def imageTag = env.BUILD_NUMBER ? "${env.BUILD_NUMBER}" : 'latest'
+
+          apps.each { app ->
+            // Définition Groovy claire de l'image (évite toute variable non-définie)
+            def image = "${env.DOCKER_REGISTRY}/${app}:${imageTag}"
+            echo "📄 Generating HTML vulnerability report for ${app} (image=${image})..."
+
+            // Exécute trivy via le conteneur officiel en montant le workspace pour écrire le rapport
+            // Utilise env.WORKSPACE pour éviter les confusions $(pwd)
+            sh """#!/bin/bash
+set -e
+# Tenter de générer un rapport HTML (template fourni dans l'image trivy)
+docker run --rm \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  -v "${env.WORKSPACE}":/reports \
+  aquasec/trivy:latest image \
+  --format template \
+  --template "@/contrib/html.tpl" \
+  -o /reports/${app}-trivy-report.html \
+  ${image} || true
+
+# Fallback: si le HTML n'a pas été produit, produire un rapport texte (table)
+if [ ! -f "${env.WORKSPACE}/${app}-trivy-report.html" ]; then
+  echo "HTML report not found for ${app}, generating plain text report..."
+  docker run --rm \
+    -v /var/run/docker.sock:/var/run/docker.sock \
+    -v "${env.WORKSPACE}":/reports \
+    aquasec/trivy:latest image --format table --no-progress ${image} > "${env.WORKSPACE}/${app}-trivy-report.txt" || true
+fi
+"""
+          }
         }
-
-
+      }
+    }
 
     stage('Dynamic Security Testing (OWASP ZAP)') {
       steps {
         script {
           try {
+            // withCredentials crée temporairement l'env ZAP_API_KEY accessible via env.ZAP_API_KEY
             withCredentials([string(credentialsId: 'owasp-zap-api-key', variable: 'ZAP_API_KEY')]) {
-              sh '''
-curl -v "http://$ZAP_HOST:$ZAP_PORT/JSON/spider/action/scan/?apikey=${ZAP_API_KEY}&url=http://${WORKER1_IP}:30004" || true
+              // utilise env.* pour interpolation Groovy sûre
+              sh """#!/bin/bash
+set -eux
+curl -v "http://${env.ZAP_HOST}:${env.ZAP_PORT}/JSON/spider/action/scan/?apikey=${env.ZAP_API_KEY}&url=http://${env.WORKER1_IP}:30004" || true
 sleep 30
-curl -v "http://$ZAP_HOST:$ZAP_PORT/JSON/ascan/action/scan/?apikey=${ZAP_API_KEY}&url=http://${WORKER1_IP}:30004" || true
+curl -v "http://${env.ZAP_HOST}:${env.ZAP_PORT}/JSON/ascan/action/scan/?apikey=${env.ZAP_API_KEY}&url=http://${env.WORKER1_IP}:30004" || true
 sleep 60
-curl -v "http://$ZAP_HOST:$ZAP_PORT/OTHER/core/other/htmlreport/?apikey=${ZAP_API_KEY}" -o owasp-zap-report.html || true
-'''
+curl -v "http://${env.ZAP_HOST}:${env.ZAP_PORT}/OTHER/core/other/htmlreport/?apikey=${env.ZAP_API_KEY}" -o "${env.WORKSPACE}/owasp-zap-report.html" || true
+"""
             }
           } catch (Exception e) {
             echo "OWASP ZAP scan failed: ${e.message}"
