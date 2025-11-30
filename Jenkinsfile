@@ -92,46 +92,33 @@ docker build --no-cache -t ${env.DOCKER_REGISTRY}/${app}:${imageTag} \
     }
 
     // ===== Trivy HTML stage (remplacé comme demandé) =====
-   stage('Image Security Scan (Trivy) - fixed') {
-  steps {
-    script {
-      def apps = ['cbs-simulator', 'middleware', 'dashboard']
-      def tag = env.BUILD_NUMBER ?: 'latest'
-
-      apps.each { app ->
-        def jsonFile = "${app}-trivy.json"
-        def txtFile  = "${app}-trivy.txt"
-        def htmlFile = "${app}-trivy.html"
-        echo "🔍 Trivy: scanning ${app} (tag=${tag})..."
-
-        sh '''#!/bin/bash
-set -e
-IMAGE="${DOCKER_REGISTRY}/${app}:${tag}"
-# note: ${DOCKER_REGISTRY}, ${app}, ${tag} are NOT expanded by Groovy here because outer string is single-quoted
-# if you want Groovy interpolation, use the other pattern.
-if docker image inspect "$IMAGE" >/dev/null 2>&1; then
-  echo "-> Scanning image: $IMAGE"
-  trivy image --no-progress --format json --output '${jsonFile}' --severity HIGH,CRITICAL "$IMAGE" || true
-  trivy image --no-progress --format table --output '${txtFile}' --severity HIGH,CRITICAL "$IMAGE" || true
-else
-  echo "-> Image not found locally, scanning workspace path ./${app}"
-  trivy fs --no-progress --format json --output '${jsonFile}' --severity HIGH,CRITICAL ./${app} || true
-  trivy fs --no-progress --format table --output '${txtFile}' --severity HIGH,CRITICAL ./${app} || true
-fi
-'''
-        // generate HTML fallback if needed
-        sh '''
-if command -v jq >/dev/null 2>&1 && [ -f '${jsonFile}' ]; then
-  echo "<html><body><pre>" > '${htmlFile}'
-  jq . '${jsonFile}' >> '${htmlFile}' || true
-  echo "</pre></body></html>" >> '${htmlFile}' || true
-fi
-'''
-        archiveArtifacts artifacts: "${jsonFile}, ${txtFile}, ${htmlFile}", allowEmptyArchive: true, fingerprint: true
-      }
-    }
-  }
-}
+   stage('Image Security Scan (Trivy - HTML)') {
+            steps {
+                script {
+                    def apps = ['cbs-simulator', 'middleware', 'dashboard']
+                    apps.each { app ->
+                        echo "📄 Generating HTML vulnerability report for ${app}..."
+                        // Mount workspace into /reports so generated HTML lands in workspace
+                        sh """
+                            docker run --rm \
+                                -v /var/run/docker.sock:/var/run/docker.sock \
+                                -v \$(pwd):/reports \
+                                aquasec/trivy:latest image \
+                                --format template \
+                                --template "@/contrib/html.tpl" \
+                                -o /reports/${app}-trivy-report.html \
+                                ${DOCKER_REGISTRY}/${app}:latest || true
+                        """
+                        // Fallback: also produce a plain text table if HTML failed (keeps pipeline robust)
+                        sh """
+                          if [ ! -f ${app}-trivy-report.html ]; then
+                              docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v \$(pwd):/reports aquasec/trivy:latest image --format table --no-progress ${DOCKER_REGISTRY}/${app}:latest > ${app}-trivy-report.txt || true
+                          fi
+                        """
+                    }
+                }
+            }
+        }
 
 
 
