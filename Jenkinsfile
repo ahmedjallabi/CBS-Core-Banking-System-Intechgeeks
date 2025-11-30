@@ -48,6 +48,29 @@ docker run --rm \
       }
     }
 
+    // ===== Trivy déplacé ici (après SonarQube) =====
+    stage('Image Security Scan (Trivy)') {
+      steps {
+        script {
+          def apps = ['cbs-simulator', 'middleware', 'dashboard']
+          def imageTag = env.BUILD_NUMBER ? "${env.BUILD_NUMBER}" : 'latest'
+          apps.each { app ->
+            echo "🔍 Trivy: scanning ${app} (looking for image ${env.DOCKER_REGISTRY}/${app}:${imageTag})..."
+            // If image exists locally (or in Docker daemon), scan image; otherwise scan filesystem
+            sh """
+if docker image inspect ${env.DOCKER_REGISTRY}/${app}:${imageTag} >/dev/null 2>&1; then
+  echo "Found image ${env.DOCKER_REGISTRY}/${app}:${imageTag} — running trivy image scan..."
+  trivy image --exit-code 0 --severity HIGH,CRITICAL ${env.DOCKER_REGISTRY}/${app}:${imageTag} > ${app}-trivy-report.txt || true
+else
+  echo "Image not found locally: running trivy filesystem scan on ./${app} ..."
+  trivy fs --exit-code 0 --severity HIGH,CRITICAL ./${app} > ${app}-trivy-report.txt || true
+fi
+"""
+          }
+        }
+      }
+    }
+
     stage('Dependency Audit (npm audit)') {
       steps {
         script {
@@ -110,19 +133,38 @@ docker run --rm \
       }
     }
 
-    stage('Image Security Scan (Trivy)') {
+    // ===== OWASP ZAP déplacé ici (après Docker Build & Push) =====
+    stage('Dynamic Security Testing (OWASP ZAP)') {
       steps {
         script {
-          def apps = ['cbs-simulator', 'middleware', 'dashboard']
-          def imageTag = env.BUILD_NUMBER ? "${env.BUILD_NUMBER}" : 'latest'
-          apps.each { app ->
-            echo "🔍 Scanning ${app} for vulnerabilities..."
-            sh "trivy image --exit-code 0 --severity HIGH,CRITICAL ${env.DOCKER_REGISTRY}/${app}:${imageTag} > ${app}-trivy-report.txt || true"
+          try {
+            withCredentials([string(credentialsId: 'owasp-zap-api-key', variable: 'ZAP_API_KEY')]) {
+              sh '''
+set -eux
+export ZAP_HOST=${ZAP_HOST}
+export ZAP_PORT=${ZAP_PORT}
+sleep 5
+# NOTE: adjust the target URL if needed (here it points to WORKER1_IP:30004)
+curl -v "http://$ZAP_HOST:$ZAP_PORT/JSON/spider/action/scan/?apikey=${ZAP_API_KEY}&url=http://${WORKER1_IP}:30004" || true
+sleep 30
+curl -v "http://$ZAP_HOST:$ZAP_PORT/JSON/ascan/action/scan/?apikey=${ZAP_API_KEY}&url=http://${WORKER1_IP}:30004" || true
+sleep 60
+curl -v "http://$ZAP_HOST:$ZAP_PORT/OTHER/core/other/htmlreport/?apikey=${ZAP_API_KEY}" -o owasp-zap-report.html || true
+'''
+            }
+          } catch (Exception e) {
+            echo "OWASP ZAP scan failed: ${e.message}"
           }
         }
       }
     }
 
+    /* 
+    ===== Deployment stage commenté (demandé par l'utilisateur) =====
+    Le bloc suivant est entièrement commenté pour désactiver le déploiement vers l'environnement de test.
+    Si tu veux le réactiver, supprime simplement les délimiteurs /* ... *\/ et décommente.
+    */
+    /*
     stage('Deployment to Test Env') {
             steps {
                 script {
@@ -191,9 +233,9 @@ docker run --rm \
                 }
             }
         }
+    */
 
-
-    stage('Verify Deployment Health pour le test') {
+    /*stage('Verify Deployment Health pour le test') {
       steps {
         script {
           sh """#!/bin/bash
@@ -215,30 +257,7 @@ curl -f -s -o /dev/null -w "Simulator (port 30005): HTTP %{http_code}\n" http://
       }
     }
 
-    stage('Dynamic Security Testing (OWASP ZAP)') {
-      steps {
-        script {
-          try {
-            withCredentials([string(credentialsId: 'owasp-zap-api-key', variable: 'ZAP_API_KEY')]) {
-              sh '''
-set -eux
-export ZAP_HOST=${ZAP_HOST}
-export ZAP_PORT=${ZAP_PORT}
-sleep 5
-curl -v "http://$ZAP_HOST:$ZAP_PORT/JSON/spider/action/scan/?apikey=${ZAP_API_KEY}&url=http://${WORKER1_IP}:30004" || true
-sleep 30
-curl -v "http://$ZAP_HOST:$ZAP_PORT/JSON/ascan/action/scan/?apikey=${ZAP_API_KEY}&url=http://${WORKER1_IP}:30004" || true
-sleep 60
-curl -v "http://$ZAP_HOST:$ZAP_PORT/OTHER/core/other/htmlreport/?apikey=${ZAP_API_KEY}" -o owasp-zap-report.html || true
-'''
-            }
-          } catch (Exception e) {
-            echo "OWASP ZAP scan failed: ${e.message}"
-          }
-        }
-      }
-    }
-  } // stages
+  }*/ // stages
 
   post {
     always {
