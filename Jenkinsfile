@@ -92,43 +92,86 @@ docker build --no-cache -t ${env.DOCKER_REGISTRY}/${app}:${imageTag} \
     }
 
     // ===== Trivy HTML stage (remplacé comme demandé) =====
-    stage('Image Security Scan (Trivy - HTML)') {
-      steps {
-        script {
-          def apps = ['cbs-simulator', 'middleware', 'dashboard']
-          def tag = env.BUILD_NUMBER ?: 'latest'
-          apps.each { app ->
-            echo "📄 Generating HTML vulnerability report for ${app}..."
-            // Mount workspace into /reports so generated HTML lands in workspace
-            sh """
-              docker run --rm \
-                -v /var/run/docker.sock:/var/run/docker.sock \
-                -v \$(pwd):/reports \
-                aquasec/trivy:latest image \
-                --format template \
-                --template "@/contrib/html.tpl" \
-                -o /reports/${app}-trivy-report.html \
-                ${DOCKER_REGISTRY}/${app}:${tag} || true
-            """
-            // Fallback: also produce a plain text table if HTML failed (keeps pipeline robust)
-            sh """
-              if [ ! -f ${app}-trivy-report.html ]; then
-                echo "⚠ HTML generation failed for ${app}. Generating TXT fallback..."
-                docker run --rm \
-                  -v /var/run/docker.sock:/var/run/docker.sock \
-                  -v \$(pwd):/reports \
-                  aquasec/trivy:latest image \
-                  --format table --no-progress \
-                  ${DOCKER_REGISTRY}/${app}:${tag} > ${app}-trivy-report.txt || true
-              fi
-            """
-          }
+    stage('Image Security Scan (Trivy)') {
+  steps {
+    script {
+      def FAIL_ON_CRITICAL = (env.FAIL_ON_CRITICAL ?: 'false').toLowerCase()
+      def apps = ['cbs-simulator', 'middleware', 'dashboard']
+      def tag = env.BUILD_NUMBER ?: 'latest'
 
-          // Archive the reports so you can download them from Jenkins UI
-          archiveArtifacts artifacts: '*-trivy-report.html, *-trivy-report.txt', allowEmptyArchive: true, fingerprint: true
+      apps.each { app ->
+        echo "🔍 Trivy: scanning ${app} (tag=${tag})..."
+        def image = "${env.DOCKER_REGISTRY}/${app}:${tag}"
+        def jsonFile = "${app}-trivy.json"
+        def txtFile  = "${app}-trivy.txt"
+        def htmlFile = "${app}-trivy.html"
+
+        // Run trivy (image if present, otherwise filesystem)
+        sh """
+set -e
+if docker image inspect "${image}" >/dev/null 2>&1; then
+  echo "-> Scanning image: ${image}"
+  trivy image --no-progress --format json --output ${jsonFile} --severity HIGH,CRITICAL "${image}" || true
+  trivy image --no-progress --format table --output ${txtFile} --severity HIGH,CRITICAL "${image}" || true
+else
+  echo "-> Image not found locally, scanning workspace path ./${app}"
+  trivy fs --no-progress --format json --output ${jsonFile} --severity HIGH,CRITICAL ./${app} || true
+  trivy fs --no-progress --format table --output ${txtFile} --severity HIGH,CRITICAL ./${app} || true
+fi
+"""
+
+        // Optional: generate a simple HTML report from JSON (if jq present)
+        sh """
+if command -v jq >/dev/null 2>&1 && [ -f ${jsonFile} ]; then
+  echo '<html><body><h2>Trivy JSON report for ${app}</h2><pre>' > ${htmlFile}
+  jq . ${jsonFile} >> ${htmlFile} || true
+  echo '</pre></body></html>' >> ${htmlFile} || true
+fi
+"""
+
+        // Count CRITICAL vulnerabilities (python3 preferred, fallback to grep)
+        def criticalCount = 0
+        try {
+          criticalCount = sh(returnStdout: true, script: """#!/bin/bash
+if command -v python3 >/dev/null 2>&1; then
+  python3 - <<'PY'
+import json,sys
+try:
+  j = json.load(open('${jsonFile}'))
+except Exception:
+  print(0)
+  sys.exit(0)
+c = 0
+for r in j.get('Results', []):
+  for v in (r.get('Vulnerabilities') or []):
+    if v.get('Severity','').upper() == 'CRITICAL':
+      c += 1
+print(c)
+PY
+else
+  grep -o "CRITICAL" ${jsonFile} 2>/dev/null | wc -l || true
+fi
+""").trim()
+          criticalCount = (criticalCount == '') ? 0 : (criticalCount as Integer)
+        } catch (err) {
+          echo "Warning: unable to compute CRITICAL count (${err}); defaulting to 0"
+          criticalCount = 0
         }
-      }
-    }
+
+        echo "-> ${app} : CRITICAL vuln count = ${criticalCount}"
+
+        // Archive artifacts so you can view them in Jenkins UI
+        archiveArtifacts artifacts: "${jsonFile}, ${txtFile}, ${htmlFile}", allowEmptyArchive: true, fingerprint: true
+
+        // Optionally fail the build if criticals found and FAIL_ON_CRITICAL=true
+        if (FAIL_ON_CRITICAL == 'true' && criticalCount > 0) {
+          error("Build failed: ${criticalCount} CRITICAL vulnerabilities found in ${app}")
+        }
+      } // apps.each
+    } // script
+  } // steps
+} // stage
+
 
     stage('Dynamic Security Testing (OWASP ZAP)') {
       steps {
