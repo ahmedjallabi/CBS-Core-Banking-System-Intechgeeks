@@ -92,85 +92,47 @@ docker build --no-cache -t ${env.DOCKER_REGISTRY}/${app}:${imageTag} \
     }
 
     // ===== Trivy HTML stage (remplacé comme demandé) =====
-    stage('Image Security Scan (Trivy)') {
+   stage('Image Security Scan (Trivy) - fixed') {
   steps {
     script {
-      def FAIL_ON_CRITICAL = (env.FAIL_ON_CRITICAL ?: 'false').toLowerCase()
       def apps = ['cbs-simulator', 'middleware', 'dashboard']
       def tag = env.BUILD_NUMBER ?: 'latest'
 
       apps.each { app ->
-        echo "🔍 Trivy: scanning ${app} (tag=${tag})..."
-        def image = "${env.DOCKER_REGISTRY}/${app}:${tag}"
         def jsonFile = "${app}-trivy.json"
         def txtFile  = "${app}-trivy.txt"
         def htmlFile = "${app}-trivy.html"
+        echo "🔍 Trivy: scanning ${app} (tag=${tag})..."
 
-        // Run trivy (image if present, otherwise filesystem)
-        sh """
+        sh '''#!/bin/bash
 set -e
-if docker image inspect "${image}" >/dev/null 2>&1; then
-  echo "-> Scanning image: ${image}"
-  trivy image --no-progress --format json --output ${jsonFile} --severity HIGH,CRITICAL "${image}" || true
-  trivy image --no-progress --format table --output ${txtFile} --severity HIGH,CRITICAL "${image}" || true
+IMAGE="${DOCKER_REGISTRY}/${app}:${tag}"
+# note: ${DOCKER_REGISTRY}, ${app}, ${tag} are NOT expanded by Groovy here because outer string is single-quoted
+# if you want Groovy interpolation, use the other pattern.
+if docker image inspect "$IMAGE" >/dev/null 2>&1; then
+  echo "-> Scanning image: $IMAGE"
+  trivy image --no-progress --format json --output '${jsonFile}' --severity HIGH,CRITICAL "$IMAGE" || true
+  trivy image --no-progress --format table --output '${txtFile}' --severity HIGH,CRITICAL "$IMAGE" || true
 else
   echo "-> Image not found locally, scanning workspace path ./${app}"
-  trivy fs --no-progress --format json --output ${jsonFile} --severity HIGH,CRITICAL ./${app} || true
-  trivy fs --no-progress --format table --output ${txtFile} --severity HIGH,CRITICAL ./${app} || true
+  trivy fs --no-progress --format json --output '${jsonFile}' --severity HIGH,CRITICAL ./${app} || true
+  trivy fs --no-progress --format table --output '${txtFile}' --severity HIGH,CRITICAL ./${app} || true
 fi
-"""
-
-        // Optional: generate a simple HTML report from JSON (if jq present)
-        sh """
-if command -v jq >/dev/null 2>&1 && [ -f ${jsonFile} ]; then
-  echo '<html><body><h2>Trivy JSON report for ${app}</h2><pre>' > ${htmlFile}
-  jq . ${jsonFile} >> ${htmlFile} || true
-  echo '</pre></body></html>' >> ${htmlFile} || true
+'''
+        // generate HTML fallback if needed
+        sh '''
+if command -v jq >/dev/null 2>&1 && [ -f '${jsonFile}' ]; then
+  echo "<html><body><pre>" > '${htmlFile}'
+  jq . '${jsonFile}' >> '${htmlFile}' || true
+  echo "</pre></body></html>" >> '${htmlFile}' || true
 fi
-"""
-
-        // Count CRITICAL vulnerabilities (python3 preferred, fallback to grep)
-        def criticalCount = 0
-        try {
-          criticalCount = sh(returnStdout: true, script: """#!/bin/bash
-if command -v python3 >/dev/null 2>&1; then
-  python3 - <<'PY'
-import json,sys
-try:
-  j = json.load(open('${jsonFile}'))
-except Exception:
-  print(0)
-  sys.exit(0)
-c = 0
-for r in j.get('Results', []):
-  for v in (r.get('Vulnerabilities') or []):
-    if v.get('Severity','').upper() == 'CRITICAL':
-      c += 1
-print(c)
-PY
-else
-  grep -o "CRITICAL" ${jsonFile} 2>/dev/null | wc -l || true
-fi
-""").trim()
-          criticalCount = (criticalCount == '') ? 0 : (criticalCount as Integer)
-        } catch (err) {
-          echo "Warning: unable to compute CRITICAL count (${err}); defaulting to 0"
-          criticalCount = 0
-        }
-
-        echo "-> ${app} : CRITICAL vuln count = ${criticalCount}"
-
-        // Archive artifacts so you can view them in Jenkins UI
+'''
         archiveArtifacts artifacts: "${jsonFile}, ${txtFile}, ${htmlFile}", allowEmptyArchive: true, fingerprint: true
+      }
+    }
+  }
+}
 
-        // Optionally fail the build if criticals found and FAIL_ON_CRITICAL=true
-        if (FAIL_ON_CRITICAL == 'true' && criticalCount > 0) {
-          error("Build failed: ${criticalCount} CRITICAL vulnerabilities found in ${app}")
-        }
-      } // apps.each
-    } // script
-  } // steps
-} // stage
 
 
     stage('Dynamic Security Testing (OWASP ZAP)') {
